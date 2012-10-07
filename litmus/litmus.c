@@ -9,6 +9,7 @@
 #include <linux/sched.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/vmalloc.h>
 
 #include <litmus/litmus.h>
 #include <litmus/bheap.h>
@@ -295,12 +296,18 @@ static void reinit_litmus_state(struct task_struct* p, int restore)
 {
 	struct rt_task  user_config = {};
 	void*  ctrl_page     = NULL;
+#ifdef CONFIG_ARCH_NEEDS_UNCACHED_CONTROL_PAGE
+	void * ctrl_page_orig = NULL;
+#endif
 
 	if (restore) {
 		/* Safe user-space provided configuration data.
 		 * and allocated page. */
 		user_config = p->rt_param.task_params;
 		ctrl_page   = p->rt_param.ctrl_page;
+#ifdef CONFIG_ARCH_NEEDS_UNCACHED_CONTROL_PAGE
+		ctrl_page_orig = p->rt_param.ctrl_page_orig;
+#endif
 	}
 
 	/* We probably should not be inheriting any task's priority
@@ -315,6 +322,9 @@ static void reinit_litmus_state(struct task_struct* p, int restore)
 	if (restore) {
 		p->rt_param.task_params = user_config;
 		p->rt_param.ctrl_page   = ctrl_page;
+#ifdef CONFIG_ARCH_NEEDS_UNCACHED_CONTROL_PAGE
+		p->rt_param.ctrl_page_orig = ctrl_page_orig;
+#endif
 	}
 }
 
@@ -458,9 +468,13 @@ void litmus_fork(struct task_struct* p)
 		reinit_litmus_state(p, 0);
 		/* Don't let the child be a real-time task.  */
 		p->sched_reset_on_fork = 1;
-	} else
+	} else {
 		/* non-rt tasks might have ctrl_page set */
 		tsk_rt(p)->ctrl_page = NULL;
+#ifdef CONFIG_ARCH_NEEDS_UNCACHED_CONTROL_PAGE
+		tsk_rt(p)->ctrl_page_orig = NULL;
+#endif
+	}
 
 	/* od tables are never inherited across a fork */
 	p->od_table = NULL;
@@ -476,27 +490,24 @@ void litmus_exec(void)
 
 	if (is_realtime(p)) {
 		WARN_ON(p->rt_param.inh_task);
-		if (tsk_rt(p)->ctrl_page) {
-			free_page((unsigned long) tsk_rt(p)->ctrl_page);
-			tsk_rt(p)->ctrl_page = NULL;
-		}
+		litmus_schedule_deallocation(p);
+		tsk_rt(p)->ctrl_page = NULL;
+#ifdef CONFIG_ARCH_NEEDS_UNCACHED_CONTROL_PAGE
+		tsk_rt(p)->ctrl_page_orig = NULL;
+#endif
 	}
 }
 
 void exit_litmus(struct task_struct *dead_tsk)
 {
+
 	/* We also allow non-RT tasks to
 	 * allocate control pages to allow
 	 * measurements with non-RT tasks.
 	 * So check if we need to free the page
 	 * in any case.
 	 */
-	if (tsk_rt(dead_tsk)->ctrl_page) {
-		TRACE_TASK(dead_tsk,
-			   "freeing ctrl_page %p\n",
-			   tsk_rt(dead_tsk)->ctrl_page);
-		free_page((unsigned long) tsk_rt(dead_tsk)->ctrl_page);
-	}
+	litmus_schedule_deallocation(dead_tsk);
 
 	/* main cleanup only for RT tasks */
 	if (is_realtime(dead_tsk))

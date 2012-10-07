@@ -2047,4 +2047,7 @@ config ARCH_HAS_SEND_PULL_TIMERS
 config ARCH_HAS_FEATHER_TRACE
 	def_bool n
 
+config ARCH_NEEDS_UNCACHED_CONTROL_PAGE
+	def_bool y
+
 source "litmus/Kconfig"

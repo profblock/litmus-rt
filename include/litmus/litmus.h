@@ -12,6 +12,8 @@
 extern atomic_t release_master_cpu;
 #endif
 
+void litmus_schedule_deallocation(struct task_struct *t);
+
 /* in_list - is a given list_head queued on some list?
  */
 static inline int in_list(struct list_head* list)

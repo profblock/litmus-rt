@@ -225,6 +225,9 @@ struct rt_param {
 
 	/* Pointer to the page shared between userspace and kernel. */
 	struct control_page * ctrl_page;
+#ifdef CONFIG_ARCH_NEEDS_UNCACHED_CONTROL_PAGE
+	void *ctrl_page_orig;
+#endif
 };
 
 /*	Possible RT flags	*/
