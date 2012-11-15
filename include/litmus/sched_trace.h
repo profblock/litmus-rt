@@ -180,6 +180,15 @@ feather_callback void do_sched_trace_sys_release(unsigned long id,
 #define trace_litmus_task_resume(t)
 #define trace_litmus_sys_release(start)
 
+#define trace_litmus_container_param(cid, name)
+#define trace_litmus_server_param(sid, cid, wcet, time)
+#define trace_litmus_server_switch_to(sid, job, tid, tjob, cpu)
+#define trace_litmus_server_switch_away(sid, job, tid, tjob, cpu)
+#define trace_litmus_server_release(sid, job, release, deadline)
+#define trace_litmus_server_completion(sid, job)
+#define trace_litmus_server_block(sid)
+#define trace_litmus_server_resume(sid)
+
 #endif
 
 
@@ -250,6 +259,46 @@ feather_callback void do_sched_trace_sys_release(unsigned long id,
 		SCHED_TRACE(SCHED_TRACE_BASE_ID + 10,			\
 			do_sched_trace_sys_release, when);		\
 		trace_litmus_sys_release(when);				\
+	} while (0)
+
+#define sched_trace_container_param(cid, name)				\
+	do {								\
+		trace_litmus_container_param(cid, name);		\
+	} while (0)
+
+#define sched_trace_server_param(sid, cid, wcet, period)		\
+	do {								\
+		trace_litmus_server_param(sid, cid, wcet, period);	\
+	} while(0)
+
+#define sched_trace_server_switch_to(sid, job, tid, tjob, cpu)		\
+	do {								\
+		trace_litmus_server_switch_to(sid, job, tid, tjob, cpu);\
+	} while(0)
+
+#define sched_trace_server_switch_away(sid, job, tid, tjob, cpu)	\
+	do {								\
+		trace_litmus_server_switch_away(sid, job, tid, tjob, cpu);\
+	} while (0)
+
+#define sched_trace_server_release(sid, job, release, deadline)		\
+	do {								\
+		trace_litmus_server_release(sid, job, release, deadline); \
+	} while (0)
+
+#define sched_trace_server_completion(sid, job)				\
+	do {								\
+		trace_litmus_server_completion(sid, job);		\
+	} while (0)
+
+#define sched_trace_server_resume(sid)					\
+	do {								\
+		trace_litmus_server_resume(sid);			\
+	} while (0)
+
+#define sched_trace_server_block(sid)					\
+	do {								\
+		trace_litmus_server_block(sid);				\
 	} while (0)
 
 #define sched_trace_quantum_boundary() /* NOT IMPLEMENTED */

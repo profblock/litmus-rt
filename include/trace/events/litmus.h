@@ -225,6 +225,183 @@ TRACE_EVENT(litmus_sys_release,
 	TP_printk("SynRelease(%Lu) at %Lu\n", __entry->rel, __entry->when)
 );
 
+/*
+ * Containers
+ */
+TRACE_EVENT(litmus_container_param,
+
+	TP_PROTO(int cid, const char *name),
+
+	TP_ARGS(cid, name),
+
+	TP_STRUCT__entry(
+		__field( int,  cid )
+		__array( char,	name,	TASK_COMM_LEN	)
+	),
+
+	TP_fast_assign(
+	       memcpy(__entry->name, name, TASK_COMM_LEN);
+	       __entry->cid = cid;
+	),
+
+	TP_printk("container, name: %s, id: %d\n", __entry->name, __entry->cid)
+);
+
+TRACE_EVENT(litmus_server_param,
+
+	TP_PROTO(int sid, int cid, unsigned long long wcet, unsigned long long period),
+
+	TP_ARGS(sid, cid, wcet, period),
+
+	TP_STRUCT__entry(
+		__field( int, sid )
+		__field( int, cid )
+		__field( unsigned long long, wcet )
+		__field( unsigned long long, period )
+	),
+
+	TP_fast_assign(
+	       __entry->cid = cid;
+	       __entry->sid = sid;
+	       __entry->wcet = wcet;
+	       __entry->period = period;
+	),
+
+	TP_printk("server(%llu, %llu), sid: %llu, cont: %llu\n",
+	          __entry->wcet, __entry->period, __entry->sid, __entry->cid)
+);
+
+TRACE_EVENT(litmus_server_switch_to,
+
+	TP_PROTO(int sid, unsigned int job, int tid, unsigned int tjob, int cpu),
+
+        TP_ARGS(sid, job, tid, tjob, cpu),
+
+	TP_STRUCT__entry(
+		__field( int, sid)
+		__field( unsigned int, job)
+		__field( int, tid)
+		__field( unsigned int, tjob)
+		__field( int, cpu)
+	),
+
+	TP_fast_assign(
+		__entry->sid = sid;
+		__entry->tid = tid;
+		__entry->job = job;
+		__entry->tjob = tjob;
+		__entry->cpu = cpu;
+	),
+
+	TP_printk("switch_to(server(%d, %u)): (%d, %d) on %d\n",
+		  __entry->sid, __entry->job, __entry->tid, __entry->tjob, __entry->cpu)
+);
+
+TRACE_EVENT(litmus_server_switch_away,
+
+	    TP_PROTO(int sid, unsigned int job, int tid, unsigned int tjob, int cpu),
+
+	    TP_ARGS(sid, job, tid, tjob, cpu),
+
+	TP_STRUCT__entry(
+		__field( int, sid)
+		__field( unsigned int, job)
+		__field( int, tid)
+		__field( unsigned int, tjob)
+		__field( int, cpu)
+	),
+
+	TP_fast_assign(
+		__entry->sid = sid;
+		__entry->tid = tid;
+		__entry->job = job;
+		__entry->tjob = tjob;
+		__entry->cpu = cpu;
+	),
+
+	TP_printk("switch_away(server(%d, %u)): (%d, %d) on %d\n",
+		  __entry->sid, __entry->job, __entry->tid, __entry->tjob, __entry->cpu)
+);
+
+TRACE_EVENT(litmus_server_release,
+
+	TP_PROTO(int sid, unsigned int job,
+		 unsigned long long release,
+		 unsigned long long deadline),
+
+	TP_ARGS(sid, job, release, deadline),
+
+	TP_STRUCT__entry(
+		__field( int, sid)
+		__field( unsigned int, job)
+		__field( unsigned long long, release)
+		__field( unsigned long long, deadline)
+	),
+
+	TP_fast_assign(
+		__entry->sid = sid;
+		__entry->job = job;
+		__entry->release = release;
+		__entry->deadline = deadline;
+	),
+
+	TP_printk("release(server(%d, %u)), release: %llu, deadline: %llu\n",
+		  __entry->sid, __entry->job, __entry->release, __entry->deadline)
+);
+
+TRACE_EVENT(litmus_server_completion,
+
+	TP_PROTO(int sid, int job),
+
+	TP_ARGS(sid, job),
+
+	TP_STRUCT__entry(
+		__field( int, sid)
+		__field( unsigned int, job)
+	),
+
+	TP_fast_assign(
+		__entry->sid = sid;
+		__entry->job = job;
+	),
+
+	TP_printk("completion(server(%d, %d))\n", __entry->sid, __entry->job)
+);
+
+TRACE_EVENT(litmus_server_resume,
+
+        TP_PROTO(int sid),
+
+        TP_ARGS(sid),
+
+	TP_STRUCT__entry(
+		__field( int, sid)
+	),
+
+	TP_fast_assign(
+		__entry->sid = sid;
+	),
+
+        TP_printk("resume(server(%d))\n", __entry->sid)
+);
+
+TRACE_EVENT(litmus_server_block,
+
+	TP_PROTO(int sid),
+
+	TP_ARGS(sid),
+
+	TP_STRUCT__entry(
+		__field( int, sid)
+	),
+
+	TP_fast_assign(
+		__entry->sid = sid;
+	),
+
+	TP_printk("block(server(%d))\n", __entry->sid)
+);
+
 #endif /* _SCHED_TASK_TRACEPOINT_H */
 
 /* Must stay outside the protection */
