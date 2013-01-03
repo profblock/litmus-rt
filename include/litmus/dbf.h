@@ -14,8 +14,6 @@
 
 typedef int	slope_t;
 
-typedef unsigned long long	lt_t;
-
 /*
  * Define a point whose transition to the next point is a step
  * If set to 0, the next point is a continuous slope.
@@ -36,13 +34,10 @@ struct point {
 	lt_t y;			/* Y-coordinate of point */
 	unsigned int flags;		/* flags. currently just the point type */
 	slope_t slope;			/* slope of line (see PRECISION) */
-//	struct list_head list;
-//	struct list_head list2;	/* for creating lists of points */
 };
 
 /* Structure defining a DBF */
 struct dbf {
-//	struct list_head points;	/* represented as a bunch of points */
 	struct point points[DBF_NPOINTS];
 	unsigned int npoints;		/* number of points in DBF */
 	slope_t slope;			/* final approximated slope of DBF */
@@ -76,7 +71,7 @@ int dbf_highest_point_index(struct dbf *dbf, lt_t x);
 /* print a DBF structure */
 void dbf_dump(struct dbf *dbf);
 
-/* add two DBF's and return the resulting DBF (alloced) */
+/* add two DBF's and return the resulting DBF */
 int dbf_add(struct dbf *res, struct dbf *a, struct dbf *b);
 /* check if every point in DBF 'b' lies below DBF 'a' and vice versa */
 int dbf_less_than(struct dbf *a, struct dbf *b);

@@ -609,17 +609,14 @@ static long psnedf_activate_plugin(void)
 	return 0;
 }
 
-static long psnedf_admit_task(struct task_struct* tsk)
+static long psnedf_admit_task(struct task_struct *tsk)
 {
 #ifdef CONFIG_PSN_EDF_QPA
 	lt_t e;
 	lt_t p;
 	lt_t d;
-	psnedf_domain_t* 	pedf = task_pedf(tsk);
+	psnedf_domain_t *pedf = task_pedf(tsk);
 	struct cap_dbf *tcap;
-
-	pr_info("admit task called for new task\n");
-
 #endif
 
 	if (!(task_cpu(tsk) == tsk->rt_param.task_params.cpu
@@ -628,12 +625,9 @@ static long psnedf_admit_task(struct task_struct* tsk)
 	     && task_cpu(tsk) != remote_edf(task_cpu(tsk))->release_master
 #endif
 		)) {
-		int c1 = task_cpu(tsk) == tsk->rt_param.task_params.cpu;
-		int c2 = task_cpu(tsk) != remote_edf(task_cpu(tsk))->release_master;
-		printk("admit_task error. task_cpu() != params.cpu %d %d\n", c1, c2);
 		return -EINVAL;
 	}
-	
+
 #ifdef CONFIG_PSN_EDF_QPA
 	/* Do a QPA with the top level */
 	e = get_exec_cost(tsk);

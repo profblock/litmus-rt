@@ -1,12 +1,10 @@
 #include <linux/kernel.h>
 
+#include <litmus/rt_param.h>
 #include <litmus/dbf.h>
 
 #include <linux/string.h>
 #include <linux/list.h>
-
-#define list_tail(list, type, member)           \
-        list_entry((list)->prev, type, member)
 
 void dbf_init(struct dbf *dbf, lt_t e, lt_t p, lt_t d)
 {
@@ -20,7 +18,7 @@ void dbf_init(struct dbf *dbf, lt_t e, lt_t p, lt_t d)
 
 void dbf_init_dup(struct dbf *dbf, struct dbf *to_copy)
 {
-	memcpy(dbf, to_copy, sizeof(struct dbf));
+	memcpy((void *)dbf, (const void *)to_copy, sizeof(*to_copy));
 }
 
 int dbf_init_rtparams(struct dbf *dbf, lt_t e, lt_t p, lt_t d)
@@ -31,8 +29,6 @@ int dbf_init_rtparams(struct dbf *dbf, lt_t e, lt_t p, lt_t d)
 	slope_t slope;
 	slope_t pslope;
 	unsigned int type;
-
-	pr_emerg("new DBF e=%llu, p=%llu, d=%llu\n", e, p, d);
 
 	dbf_init(dbf, e, p, d);
 	if (dbf_append_point(dbf, 0, 0, POINT_TYPE_STEP, 0) < 0) {
@@ -76,7 +72,7 @@ int dbf_append_point(struct dbf *dbf, lt_t x, lt_t y,
 	struct point *p;
 
 	if (dbf->npoints >= DBF_NPOINTS) {
-		pr_info("DBF has too many points. npoints = %d\n", dbf->npoints);
+		pr_info("DBF has too many points (%d)\n", dbf->npoints);
 		return -1;
 	}
 
@@ -92,8 +88,8 @@ int dbf_append_point(struct dbf *dbf, lt_t x, lt_t y,
 	 * TODO: when using arbitrary DBFs, change the slope of the previously
 	 * last point when adding a new one
 	 *
-	 * TODO: perhaps some error checking? eg. no point appended should make the
-	 * DBF non-decreasing.
+	 * TODO: perhaps some error checking? eg. no point appended should make
+	 * the DBF non-decreasing.
 	 */
 
 	return 0;
@@ -111,9 +107,11 @@ void dbf_delete_point(struct dbf *dbf, unsigned int idx)
 	if (idx >= dbf->npoints)
 		return;
 
+	/* TODO if idx is last point? */
 	for (i = idx; i < dbf->npoints - 1; i++)
-		memcpy(&dbf->points[i], &dbf->points[i+1], sizeof(struct point));
-	
+		memcpy(&dbf->points[i], &dbf->points[i+1],
+			sizeof(struct point));
+
 	dbf->npoints--;
 }
 
@@ -167,7 +165,7 @@ int dbf_point_at(struct point *r, struct dbf *dbf, lt_t x, int opts)
 		/* not possible for p1 to be NULL because of (0,0) */
 		p1 = p;
 	}
-	
+
 	memset(r, 0, sizeof(struct point));
 
 	/*
@@ -193,19 +191,15 @@ int dbf_point_at(struct point *r, struct dbf *dbf, lt_t x, int opts)
 		r->flags = p1->flags;
 		r->slope = p1->slope;
 	} else {
-		/*
-		 * this assert will prevent people from appending to DBFs in a
-		 * way that makes them non-decreasing.
-		 */
 		if (p1->flags == POINT_TYPE_STEP) {
-			/* r is a point between two points of a step function */
+			/* r is between two points of a step function */
 			r->y = p1->y;
 			r->flags = POINT_TYPE_STEP;
 			r->slope = 0;
 		} else {
-			/* r is a point between points of a continuous function */
+			/* r is between points of a continuous function */
 			add = (opts == P_OPT_CEIL) ? PRECISION : 0;
-			r->y = p1->y + (p1->slope * (x - p1->x) + add)/PRECISION;
+			r->y = p1->y + (p1->slope * (x-p1->x) + add)/PRECISION;
 			r->flags = POINT_TYPE_CONT;
 			r->slope = p1->slope;
 		}
@@ -222,7 +216,8 @@ int dbf_add(struct dbf *res, struct dbf *a, struct dbf *b)
 	dbf_clear(res);
 	dbf_init(res, 0, 0, 0);
 
-	while (i < a->npoints && j < b->npoints && res->npoints < DBF_NPOINTS) {
+	while (i < a->npoints && j < b->npoints &&
+		res->npoints < DBF_NPOINTS) {
 		struct point *pa;
 		struct point *pb;
 		struct point x;
@@ -232,14 +227,14 @@ int dbf_add(struct dbf *res, struct dbf *a, struct dbf *b)
 
 		if (pa->x < pb->x) {
 			dbf_point_at(&x, b, pa->x, 0);
-			dbf_append_point(res, pa->x, pa->y + x.y, x.flags | pa->flags,
-				x.slope + pa->slope);
+			dbf_append_point(res, pa->x, pa->y + x.y,
+				x.flags | pa->flags, x.slope + pa->slope);
 			i++;
 		} else {
 			/* pa->x >= pb->x */
 			dbf_point_at(&x, a, pb->x, 0);
-			dbf_append_point(res, pb->x, pb->y + x.y, x.flags | pb->flags,
-				x.slope + pb->slope);
+			dbf_append_point(res, pb->x, pb->y + x.y,
+				x.flags | pb->flags, x.slope + pb->slope);
 			j++;
 			if (pa->x == pb->x)
 				i++;
@@ -261,7 +256,7 @@ int dbf_add(struct dbf *res, struct dbf *a, struct dbf *b)
 		struct point *pb;
 		struct point x;
 		pb = dbf_get_point(b, j);
-		dbf_point_at(&x, a, pb->x, 0);	
+		dbf_point_at(&x, a, pb->x, 0);
 		dbf_append_point(res, pb->x, pb->y + x.y, x.flags | pb->flags,
 			x.slope + pb->slope);
 		j++;
@@ -309,10 +304,10 @@ int dbf_less_than(struct dbf *a, struct dbf *b)
 long long dbf_find_interval(struct dbf *dbf, int opts)
 {
 	struct point *p;
-	lt_t x;
+	long long x;
 
 	p = &dbf->points[dbf->npoints-1];
-	
+
 	/* x = (y1 - m*x1)/(m + 1) */
 	x = ((p->y*PRECISION - p->slope*p->x)/(p->slope + PRECISION));
 
@@ -320,7 +315,7 @@ long long dbf_find_interval(struct dbf *dbf, int opts)
 		return x/PRECISION;
 
 	if (opts == P_OPT_CEIL)
-		return ((x + PRECISION)/PRECISION);
+		return (x + PRECISION)/PRECISION;
 	else
 		return x / PRECISION;
 }
@@ -336,7 +331,7 @@ int dbf_highest_point_index(struct dbf *dbf, lt_t x)
 		if (p->x > x)
 			return i - 1;
 		else if (p->x == x)
-			return i;	/* TODO: assume no DBF has 2 same points */
+			return i;	/* assume no DBF has 2 same points */
 	}
 
 	return -1;
