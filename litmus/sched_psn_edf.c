@@ -22,17 +22,21 @@
 #include <litmus/edf_common.h>
 #include <litmus/sched_trace.h>
 #include <litmus/trace.h>
+#include <litmus/cap_dbf.h>
 
-typedef struct {
-	rt_domain_t 		domain;
-	int          		cpu;
-	struct task_struct* 	scheduled; /* only RT tasks */
 /*
  * scheduling lock slock
  * protects the domain and serializes scheduling decisions
  */
 #define slock domain.ready_lock
 
+typedef struct {
+	rt_domain_t 		domain;
+	int          		cpu;
+	struct task_struct* 	scheduled;	/* only RT tasks */
+#ifdef CONFIG_PSN_EDF_QPA
+	struct cap_dbf		top;		/* top level capability */
+#endif
 } psnedf_domain_t;
 
 DEFINE_PER_CPU(psnedf_domain_t, psnedf_domains);
@@ -53,6 +57,9 @@ static void psnedf_domain_init(psnedf_domain_t* pedf,
 	edf_domain_init(&pedf->domain, check, release);
 	pedf->cpu      		= cpu;
 	pedf->scheduled		= NULL;
+#ifdef CONFIG_PSN_EDF_QPA
+	cap_dbf_init(&pedf->top, NULL, CAPABILITY_TOP_LEVEL);
+#endif
 }
 
 static void requeue(struct task_struct* t, rt_domain_t *edf)
@@ -604,15 +611,49 @@ static long psnedf_activate_plugin(void)
 
 static long psnedf_admit_task(struct task_struct* tsk)
 {
-	if (task_cpu(tsk) == tsk->rt_param.task_params.cpu
+#ifdef CONFIG_PSN_EDF_QPA
+	lt_t e;
+	lt_t p;
+	lt_t d;
+	psnedf_domain_t* 	pedf = task_pedf(tsk);
+	struct cap_dbf *tcap;
+
+	pr_info("admit task called for new task\n");
+
+#endif
+
+	if (!(task_cpu(tsk) == tsk->rt_param.task_params.cpu
 #ifdef CONFIG_RELEASE_MASTER
 	    /* don't allow tasks on release master CPU */
 	     && task_cpu(tsk) != remote_edf(task_cpu(tsk))->release_master
 #endif
-		)
-		return 0;
-	else
+		)) {
+		int c1 = task_cpu(tsk) == tsk->rt_param.task_params.cpu;
+		int c2 = task_cpu(tsk) != remote_edf(task_cpu(tsk))->release_master;
+		printk("admit_task error. task_cpu() != params.cpu %d %d\n", c1, c2);
 		return -EINVAL;
+	}
+	
+#ifdef CONFIG_PSN_EDF_QPA
+	/* Do a QPA with the top level */
+	e = get_exec_cost(tsk);
+	p = get_rt_period(tsk);
+	d = get_rt_relative_deadline(tsk);
+
+	pr_info("trying to admit task with e=%lld, p=%lld, d=%lld\n", e, p, d);
+
+	tcap = get_capability(tsk);
+	cap_dbf_create(tcap, e, p, d, &pedf->top, 0);
+
+	if (cap_dbf_split(&pedf->top, tcap) < 0) {
+		pr_err("failed to admit task\n");
+		cap_dbf_destroy(tcap);
+		return -EPERM;
+	}
+
+	pr_info("task admitted successfully\n");
+#endif
+	return 0;
 }
 
 /*	Plugin object	*/

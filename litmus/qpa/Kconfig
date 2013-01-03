@@ -1,0 +1,7 @@
+config PSN_EDF_QPA
+	bool "Do QPA based admission control in PSN-EDF"
+	default n
+	help
+	  With  this option enabled, a QPA test will be done before admitting
+	  a task onto any CPU using PSN-EDF.
+

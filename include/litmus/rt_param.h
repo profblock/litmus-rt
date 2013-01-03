@@ -5,6 +5,7 @@
 #ifndef _LINUX_RT_PARAM_H_
 #define _LINUX_RT_PARAM_H_
 
+
 /* Litmus time type. */
 typedef unsigned long long lt_t;
 
@@ -32,6 +33,9 @@ typedef enum {
 	QUANTUM_ENFORCEMENT, /* budgets are only checked on quantum boundaries */
 	PRECISE_ENFORCEMENT  /* budgets are enforced with hrtimers */
 } budget_policy_t;
+
+#include <litmus/dbf.h>
+#include <litmus/cap_dbf.h>
 
 /* We use the common priority interpretation "lower index == higher priority",
  * which is commonly used in fixed-priority schedulability analysis papers.
@@ -62,6 +66,7 @@ struct rt_task {
 	unsigned int	priority;
 	task_class_t	cls;
 	budget_policy_t budget_policy; /* ignored by pfair */
+	struct cap_dbf	cap;		/* only used by QPA */
 };
 
 union np_flag {

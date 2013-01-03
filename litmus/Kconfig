@@ -2,6 +2,8 @@ menu "LITMUS^RT"
 
 menu "Scheduling"
 
+source "litmus/qpa/Kconfig"
+
 config PLUGIN_CEDF
         bool "Clustered-EDF"
 	depends on X86 && SYSFS
