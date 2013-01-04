@@ -58,7 +58,7 @@ static void psnedf_domain_init(psnedf_domain_t* pedf,
 	pedf->cpu      		= cpu;
 	pedf->scheduled		= NULL;
 #ifdef CONFIG_PSN_EDF_QPA
-	cap_dbf_init(&pedf->top, NULL, CAPABILITY_TOP_LEVEL);
+	cap_dbf_init(&pedf->top, NULL, NULL, CAPABILITY_TOP_LEVEL);
 #endif
 }
 
@@ -636,14 +636,19 @@ static long psnedf_admit_task(struct task_struct *tsk)
 
 	pr_info("trying to admit task with e=%lld, p=%lld, d=%lld\n", e, p, d);
 
-	tcap = get_capability(tsk);
-	cap_dbf_create(tcap, e, p, d, &pedf->top, 0);
+	tcap = cap_dbf_create(e, p, d, &pedf->top, tsk, 0);
+	if (!tcap) {
+		pr_info("failed to allocate new capability. OOM.\n");
+		return -ENOMEM;
+	}
 
 	if (cap_dbf_split(&pedf->top, tcap) < 0) {
 		pr_err("failed to admit task\n");
 		cap_dbf_destroy(tcap);
 		return -EPERM;
 	}
+
+	cap_dbf_assign(tcap, tsk);
 
 	pr_info("task admitted successfully\n");
 #endif

@@ -66,7 +66,7 @@ struct rt_task {
 	unsigned int	priority;
 	task_class_t	cls;
 	budget_policy_t budget_policy; /* ignored by pfair */
-	struct cap_dbf	cap;		/* only used by QPA */
+	struct cap_dbf	*cap;		/* only used by QPA */
 };
 
 union np_flag {

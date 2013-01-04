@@ -1,6 +1,8 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
+#include <linux/slab.h>
 
+#include <litmus/litmus.h>
 #include <litmus/rt_param.h>
 #include <litmus/cap_dbf.h>
 
@@ -8,30 +10,32 @@ static struct dbf sum;
 static struct dbf tmp;
 
 void cap_dbf_init(struct cap_dbf *cap,
-	struct cap_dbf *parent, unsigned int flags)
+	struct cap_dbf *parent, struct task_struct *tsk, unsigned int flags)
 {
 	/* TODO: if cap is already created, do cleanup here */
 	INIT_LIST_HEAD(&cap->children);
-	INIT_LIST_HEAD(&cap->tasks);
 	cap->parent = parent;
 	cap->flags = flags;
+	cap->owner = tsk;
 }
 
-int cap_dbf_create(struct cap_dbf *c, lt_t e, lt_t p, lt_t d,
-	struct cap_dbf *parent, unsigned int flags)
+struct cap_dbf *cap_dbf_create(lt_t e, lt_t p, lt_t d, struct cap_dbf *parent,
+	struct task_struct *tsk, unsigned int flags)
 {
 	int ret;
+	struct cap_dbf *c;
 
+	c = kmalloc(sizeof(struct cap_dbf), GFP_ATOMIC);
 	if (!c)
-		return -1;
+		return NULL;
 
 	ret = dbf_init_rtparams(&c->dbf, e, p, d);
 	if (ret < 0)
-		return ret;
+		return NULL;
 
-	cap_dbf_init(c, parent, flags);
+	cap_dbf_init(c, parent, tsk, flags);
 
-	return 0;
+	return c;
 }
 
 int do_schedulability_check(struct cap_dbf *parent, struct cap_dbf *new)
@@ -141,6 +145,21 @@ int cap_dbf_destroy(struct cap_dbf *cap)
 {
 	/* TODO */
 	/* Remove itself from parent */
+	list_del(&cap->list);
 	/* Remove RT capability of all children. ie. call destroy on them */
+	kfree(cap);
 	return 0;
+}
+
+void cap_dbf_assign(struct cap_dbf *cap, struct task_struct *tsk)
+{
+#if 0
+	TODO:
+	if (tsk->cap) {
+		cap_dbf_destroy(tsk->cap);
+		kfree(tsk->cap);
+	}
+#endif
+	set_capability(tsk, cap);
+	cap->owner = tsk;
 }
