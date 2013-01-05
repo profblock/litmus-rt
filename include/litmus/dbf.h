@@ -32,8 +32,8 @@ typedef int	slope_t;
 struct point {
 	lt_t x;			/* X-coordinate of point */
 	lt_t y;			/* Y-coordinate of point */
-	unsigned int flags;		/* flags. currently just the point type */
-	slope_t slope;			/* slope of line (see PRECISION) */
+	unsigned int flags;	/* flags. currently just the point type */
+	slope_t slope;		/* slope of line (see PRECISION) */
 };
 
 /* Structure defining a DBF */
