@@ -380,6 +380,11 @@ static void psnedf_task_exit(struct task_struct * t)
 	if (pedf->scheduled == t)
 		pedf->scheduled = NULL;
 
+#ifdef CONFIG_PSN_EDF_QPA
+	if (get_capability(t))
+		cap_dbf_destroy(get_capability(t));
+#endif
+
 	TRACE_TASK(t, "RIP, now reschedule\n");
 
 	preempt(pedf);
