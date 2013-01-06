@@ -36,6 +36,7 @@ typedef struct {
 	struct task_struct* 	scheduled;	/* only RT tasks */
 #ifdef CONFIG_PSN_EDF_QPA
 	struct cap_dbf		top;		/* top level capability */
+	int			max_cap_id;	/* max cap ID used */
 #endif
 } psnedf_domain_t;
 
@@ -59,6 +60,8 @@ static void psnedf_domain_init(psnedf_domain_t* pedf,
 	pedf->scheduled		= NULL;
 #ifdef CONFIG_PSN_EDF_QPA
 	cap_dbf_init(&pedf->top, NULL, NULL, CAPABILITY_TOP_LEVEL);
+	pedf->top.cid = 0;
+	pedf->max_cap_id = 1;
 #endif
 }
 
@@ -620,6 +623,7 @@ static long psnedf_admit_task(struct task_struct *tsk)
 	lt_t e;
 	lt_t p;
 	lt_t d;
+	unsigned long flags;
 	psnedf_domain_t *pedf = task_pedf(tsk);
 	struct cap_dbf *tcap;
 #endif
@@ -634,6 +638,8 @@ static long psnedf_admit_task(struct task_struct *tsk)
 	}
 
 #ifdef CONFIG_PSN_EDF_QPA
+	raw_spin_lock_irqsave(&pedf->slock, flags);
+
 	/* Do a QPA with the top level */
 	e = get_exec_cost(tsk);
 	p = get_rt_period(tsk);
@@ -641,21 +647,26 @@ static long psnedf_admit_task(struct task_struct *tsk)
 
 	pr_info("trying to admit task with e=%lld, p=%lld, d=%lld\n", e, p, d);
 
-	tcap = cap_dbf_create(e, p, d, &pedf->top, tsk, 0);
+
+	tcap = cap_dbf_create(e, p, d, pedf->max_cap_id, &pedf->top, tsk, 0);
 	if (!tcap) {
 		pr_info("failed to allocate new capability. OOM.\n");
+		raw_spin_unlock_irqrestore(&pedf->slock, flags);
 		return -ENOMEM;
 	}
+	pedf->max_cap_id++;
 
 	if (cap_dbf_split(&pedf->top, tcap) < 0) {
 		pr_err("failed to admit task\n");
 		cap_dbf_destroy(tcap);
+		raw_spin_unlock_irqrestore(&pedf->slock, flags);
 		return -EPERM;
 	}
 
 	cap_dbf_assign(tcap, tsk);
 
 	pr_info("task admitted successfully\n");
+	raw_spin_unlock_irqrestore(&pedf->slock, flags);
 #endif
 	return 0;
 }

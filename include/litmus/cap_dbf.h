@@ -9,6 +9,7 @@
 #define CAPABILITY_LEAF_LEVEL	(1 << 1)
 
 struct cap_dbf {
+	int cid;
 	struct dbf dbf;			/* DBF of capability (NULL for root) */
 	struct list_head children;	/* Child capabilities (splits) */
 	struct cap_dbf *parent;		/* The parent capability */
@@ -21,8 +22,8 @@ struct cap_dbf {
 void cap_dbf_init(struct cap_dbf *cap,
 	struct cap_dbf *parent, struct task_struct *tsk, unsigned int flags);
 /* create a new capability */
-struct cap_dbf *cap_dbf_create(lt_t e, lt_t p, lt_t d, struct cap_dbf *parent,
-	struct task_struct *tsk, unsigned int flags);
+struct cap_dbf *cap_dbf_create(lt_t e, lt_t p, lt_t d, int id,
+	struct cap_dbf *parent, struct task_struct *tsk, unsigned int flags);
 /* Split a capability by adding child to the parent (err if inadmissible */
 int cap_dbf_split(struct cap_dbf *parent, struct cap_dbf *child);
 /* Destroy a capability and return the resources to the parent */

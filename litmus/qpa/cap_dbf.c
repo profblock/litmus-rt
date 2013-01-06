@@ -19,8 +19,8 @@ void cap_dbf_init(struct cap_dbf *cap,
 	cap->owner = tsk;
 }
 
-struct cap_dbf *cap_dbf_create(lt_t e, lt_t p, lt_t d, struct cap_dbf *parent,
-	struct task_struct *tsk, unsigned int flags)
+struct cap_dbf *cap_dbf_create(lt_t e, lt_t p, lt_t d, int id,
+	struct cap_dbf *parent, struct task_struct *tsk, unsigned int flags)
 {
 	int ret;
 	struct cap_dbf *c;
@@ -144,8 +144,6 @@ int cap_dbf_split(struct cap_dbf *parent, struct cap_dbf *child)
 int cap_dbf_destroy(struct cap_dbf *cap)
 {
 	/* TODO */
-	/* Remove itself from parent */
-	list_del(&cap->list);
 	/* Remove RT capability of all children. ie. call destroy on them */
 	kfree(cap);
 	return 0;
