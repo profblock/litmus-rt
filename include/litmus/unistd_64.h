@@ -29,5 +29,11 @@ __SYSCALL(__NR_wait_for_ts_release, sys_wait_for_ts_release)
 __SYSCALL(__NR_release_ts, sys_release_ts)
 #define __NR_null_call				__LSC(11)
 __SYSCALL(__NR_null_call, sys_null_call)
+#define __NR_cap_split				__LSC(12)
+__SYSCALL(__NR_cap_split, sys_cap_split)
+#define __NR_cap_assign				__LSC(13)
+__SYSCALL(__NR_cap_assign, sys_cap_assign)
+#define __NR_cap_revoke				__LSC(14)
+__SYSCALL(__NR_cap_revoke, sys_cap_revoke)
 
-#define NR_litmus_syscalls 12
+#define NR_litmus_syscalls 15

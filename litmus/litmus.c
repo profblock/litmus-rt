@@ -291,6 +291,21 @@ asmlinkage long sys_null_call(cycles_t __user *ts)
 	return ret;
 }
 
+asmlinkage long sys_cap_split(int dummy)
+{
+	return 0;
+}
+
+asmlinkage long sys_cap_assign(int dummy)
+{
+	return 0;
+}
+
+asmlinkage long sys_cap_revoke(int dummy)
+{
+	return 0;
+}
+
 /* p is a real-time task. Re-init its state as a best-effort task. */
 static void reinit_litmus_state(struct task_struct* p, int restore)
 {

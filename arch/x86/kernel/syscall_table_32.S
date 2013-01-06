@@ -358,3 +358,6 @@ ENTRY(sys_call_table)
 	.long sys_wait_for_ts_release
 	.long sys_release_ts		/* +10 */
 	.long sys_null_call
+	.long sys_cap_split
+	.long sys_cap_assign
+	.long sys_cap_revoke
