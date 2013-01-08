@@ -50,12 +50,14 @@ static long do_wait_for_ts_release(void)
 	ret = wait_for_completion_interruptible(&wait.completion);
 
 	if (!ret) {
-		/* Completion succeeded, setup release. */
-		litmus->release_at(current, wait.ts_release_time
-				   + current->rt_param.task_params.phase
-				   - current->rt_param.task_params.period);
-		/* trigger advance to next job release at the programmed time */
-		ret = complete_job();
+		if (is_realtime(current)) {
+			/* Completion succeeded, setup release. */
+			litmus->release_at(current, wait.ts_release_time
+					   + current->rt_param.task_params.phase
+					   - current->rt_param.task_params.period);
+			/* trigger advance to next job release at the programmed time */
+			ret = complete_job();
+		}
 	} else {
 		/* We were interrupted, must cleanup list. */
 		mutex_lock(&task_release_lock);
@@ -106,6 +108,9 @@ static long do_release_ts(lt_t start)
 			list_entry(pos, struct ts_release_wait, list);
 
 		task_count++;
+
+		/* RT tasks can be delayed.  Non-RT tasks are released
+		   immediately. */
 		wait->ts_release_time = start;
 		complete(&wait->completion);
 	}
@@ -123,10 +128,8 @@ out:
 asmlinkage long sys_wait_for_ts_release(void)
 {
 	long ret = -EPERM;
-	struct task_struct *t = current;
 
-	if (is_realtime(t))
-		ret = do_wait_for_ts_release();
+	ret = do_wait_for_ts_release();
 
 	return ret;
 }
@@ -135,16 +138,21 @@ asmlinkage long sys_wait_for_ts_release(void)
 
 asmlinkage long sys_release_ts(lt_t __user *__delay)
 {
-	long ret;
-	lt_t delay;
+	long ret = 0;
+	lt_t delay = 0;
 	lt_t start_time;
 
 	/* FIXME: check capabilities... */
 
-	ret = copy_from_user(&delay, __delay, sizeof(delay));
+	if (__delay)
+		ret = copy_from_user(&delay, __delay, sizeof(delay));
+
 	if (ret == 0) {
 		/* round up to next larger integral millisecond */
 		start_time = ((litmus_clock() / ONE_MS) + 1) * ONE_MS;
+
+		/* Note: Non-rt tasks that participate in a sync release cannot be
+		   delayed.  They will be released immediately. */
 		ret = do_release_ts(start_time + delay);
 	}
 
