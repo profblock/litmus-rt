@@ -17,6 +17,7 @@
 #include <litmus/rt_domain.h>
 #include <litmus/litmus_proc.h>
 #include <litmus/sched_trace.h>
+#include <litmus/cap_dbf.h>
 
 #ifdef CONFIG_SCHED_CPU_AFFINITY
 #include <litmus/affinity.h>
@@ -34,6 +35,10 @@ atomic_t __log_seq_no = ATOMIC_INIT(0);
 #ifdef CONFIG_RELEASE_MASTER
 /* current master CPU for handling timer IRQs */
 atomic_t release_master_cpu = ATOMIC_INIT(NO_CPU);
+#endif
+
+#ifdef CONFIG_PSN_EDF_QPA
+static DEFINE_RAW_SPINLOCK(cap_lock);
 #endif
 
 static struct kmem_cache * bheap_node_cache;
@@ -291,18 +296,198 @@ asmlinkage long sys_null_call(cycles_t __user *ts)
 	return ret;
 }
 
-asmlinkage long sys_cap_split(int dummy)
+DEFINE_PER_CPU(struct cap_dbf, top_cap);
+DEFINE_PER_CPU(int, next_cap_id);
+
+int cap_first_call = 1;
+
+void top_level_cap_init(void *dummy)
 {
+	int cpu;
+	struct cap_dbf *c;
+	int *next_id;
+	
+	cpu =  get_cpu();
+	c = &per_cpu(top_cap, cpu);
+	next_id = &per_cpu(next_cap_id, cpu);
+
+	cap_dbf_init(c, NULL, NULL, CAPABILITY_TOP_LEVEL);
+	c->cid = 0;
+	*next_id = 1;
+
+	put_cpu();
+}
+
+void cap_check_first_call(void)
+{
+	if (cap_first_call == 1) {
+		pr_emerg("initializing top first time on all CPUs\n");
+		cap_first_call = 0;
+		on_each_cpu(top_level_cap_init, NULL, 1);
+	}
+}
+
+asmlinkage long sys_cap_split(int cpu, int p_id, unsigned long long e,
+	unsigned long long p, unsigned long long d)
+{
+	int nid;
+	struct cap_dbf *top;
+	struct cap_dbf *parent;
+	struct cap_dbf *new;
+
+	raw_spin_lock(&cap_lock);
+
+	cap_check_first_call();
+
+	/* TODO get_cpu(), put_cpu()?? */
+
+	/* Find target DBF by walking cap tree */
+	top = &per_cpu(top_cap, cpu);
+	parent = cap_dbf_find(top, p_id);
+	if (!parent) {
+		pr_emerg("parent is invalid\n");
+		raw_spin_unlock(&cap_lock);
+		return -EINVAL;
+	}
+
+	/* We found the parent. Create a capability */
+	nid = per_cpu(next_cap_id, cpu);
+	new = cap_dbf_create(e, p, d, nid, parent, NULL, 0);
+	if (!new) {
+		pr_emerg("creating DBF failed\n");
+		raw_spin_unlock(&cap_lock);
+		return -EINVAL;
+	}
+
+	/* Split based on passed parameters */
+	if (cap_dbf_split(parent, new) < 0) {
+		pr_emerg("splitting failed on cpu %d\n", cpu);
+		cap_dbf_destroy(new);
+		raw_spin_unlock(&cap_lock);
+		return -EPERM;
+	}
+
+	pr_emerg("split succeeded on cpu %d\n", cpu);
+
+	/* increment next_cap_id now */
+	per_cpu(next_cap_id, cpu)++;
+
+	raw_spin_unlock(&cap_lock);
+
+	return nid;
+}
+
+asmlinkage long sys_cap_assign(int cpu, int cap_id, pid_t pid)
+{
+	struct cap_dbf *top;
+	struct cap_dbf *cap;
+	struct task_struct *target;
+
+	raw_spin_lock(&cap_lock);
+	cap_check_first_call();
+
+	/* TODO get_cpu(), put_cpu()?? */
+	if (cap_id < 0) {
+		pr_emerg("invalid parent DBF %d specified\n", cap_id);
+		raw_spin_unlock(&cap_lock);
+		return -EINVAL;
+	}
+
+	/* Find target DBF by walking cap tree */
+	top = &per_cpu(top_cap, cpu);
+	cap = cap_dbf_find(top, cap_id);
+	if (!cap) {
+		pr_emerg("parent %d is invalid\n", cap_id);
+		raw_spin_unlock(&cap_lock);
+		return -EINVAL;
+	}
+
+	if (cap->owner) {
+		pr_emerg("cap %d on cpu %d already assigned\n", cap_id, cpu);
+		raw_spin_unlock(&cap_lock);
+		return -EINVAL;
+	}
+
+	/* Find task by PID make sure its not realtime */
+	read_lock_irq(&tasklist_lock);
+	pr_emerg("finding task %d\n", pid);
+	if (!(target = find_task_by_vpid(pid))) {
+		pr_emerg("target pid %u not found\n", pid);
+		read_unlock_irq(&tasklist_lock);
+		raw_spin_unlock(&cap_lock);
+		return -ESRCH;
+	}
+
+
+	if (is_realtime(target)) {
+		/* The task is already a real-time task.
+		 * We cannot not allow parameter changes at this point.
+		 */
+		pr_emerg("target it already realtime\n");
+		read_unlock_irq(&tasklist_lock);
+		raw_spin_unlock(&cap_lock);
+		return -EINVAL;
+	}
+
+	/* make sure the task we assign to is on the right processor */
+	if (task_cpu(target) != cpu) {
+		pr_emerg("task partition not correct cpu=%d, part=%d\n",
+			cpu, task_cpu(target));
+		read_unlock_irq(&tasklist_lock);
+		raw_spin_unlock(&cap_lock);
+		return -EINVAL;
+	}
+
+	if (get_capability(target)) {
+		pr_emerg("task %d already has cap set\n", pid);
+		read_unlock_irq(&tasklist_lock);
+		raw_spin_unlock(&cap_lock);
+		return -EINVAL;
+	}
+
+	pr_emerg("task %d found on partition %d\n", pid, cpu);
+
+	/* Assign the cap to it and vice versa */
+	cap_dbf_assign(cap, target);
+
+	read_unlock_irq(&tasklist_lock);
+	raw_spin_unlock(&cap_lock);
 	return 0;
 }
 
-asmlinkage long sys_cap_assign(int dummy)
+asmlinkage long sys_cap_revoke(int cpu, int cap_id)
 {
-	return 0;
-}
+	raw_spin_lock(&cap_lock);
+	cap_check_first_call();
 
-asmlinkage long sys_cap_revoke(int dummy)
-{
+	/* Find CPU structure */
+	struct cap_dbf *top;
+	struct cap_dbf *cap;
+	struct task_struct *target;
+
+	raw_spin_lock(&cap_lock);
+	cap_check_first_call();
+
+	/* TODO get_cpu(), put_cpu()?? */
+	if (cap_id < 0) {
+		pr_emerg("invalid parent DBF %d specified\n", cap_id);
+		raw_spin_unlock(&cap_lock);
+		return -EINVAL;
+	}
+
+	/* Find target DBF by walking cap tree */
+	top = &per_cpu(top_cap, cpu);
+	cap = cap_dbf_find(top, cap_id);
+	if (!cap) {
+		pr_emerg("parent %d is invalid\n", cap_id);
+		raw_spin_unlock(&cap_lock);
+		return -EINVAL;
+	}
+
+	/* Destroy capability children */
+	/* Destroy capability */
+	/* Demote entire subtree from RT status (set t->policy = old_policy) */
+	raw_spin_unlock(&cap_lock);
 	return 0;
 }
 

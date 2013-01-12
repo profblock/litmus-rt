@@ -34,6 +34,7 @@ struct cap_dbf *cap_dbf_create(lt_t e, lt_t p, lt_t d, int id,
 		return NULL;
 
 	cap_dbf_init(c, parent, tsk, flags);
+	c->cid = id;
 
 	return c;
 }
@@ -145,6 +146,10 @@ int cap_dbf_destroy(struct cap_dbf *cap)
 {
 	/* TODO */
 	/* Remove RT capability of all children. ie. call destroy on them */
+	if (cap->owner) {
+		set_capability(cap->owner, NULL);
+		/* Revoke RT capabilities of owner task */
+	}
 	kfree(cap);
 	return 0;
 }
@@ -160,4 +165,21 @@ void cap_dbf_assign(struct cap_dbf *cap, struct task_struct *tsk)
 #endif
 	set_capability(tsk, cap);
 	cap->owner = tsk;
+}
+
+struct cap_dbf *cap_dbf_find(struct cap_dbf *parent, int id)
+{
+	struct cap_dbf *t;
+	struct cap_dbf *res;
+
+	if (parent->cid == id)
+		return parent;
+
+	list_for_each_entry(t, &parent->children, list) {
+		res = cap_dbf_find(t, id);
+		if (res)
+			return res;
+	}
+
+	return NULL;
 }

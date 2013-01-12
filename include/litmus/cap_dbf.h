@@ -1,12 +1,13 @@
 #ifndef LINUX_DBF_CAP_H
 #define LINUX_DBF_CAP_H
 
-#include <linux/list.h>
-
 #include <litmus/dbf.h>
 
 #define CAPABILITY_TOP_LEVEL	(1 << 0)
 #define CAPABILITY_LEAF_LEVEL	(1 << 1)
+
+#ifdef __KERNEL__
+#include <linux/list.h>
 
 struct cap_dbf {
 	int cid;
@@ -29,5 +30,8 @@ int cap_dbf_split(struct cap_dbf *parent, struct cap_dbf *child);
 /* Destroy a capability and return the resources to the parent */
 int cap_dbf_destroy(struct cap_dbf *cap);
 void cap_dbf_assign(struct cap_dbf *cap, struct task_struct *tsk);
+struct cap_dbf *cap_dbf_find(struct cap_dbf *parent, int id);
+
+#endif /* __KERNEL__ */
 
 #endif
