@@ -384,8 +384,8 @@ static void psnedf_task_exit(struct task_struct * t)
 		pedf->scheduled = NULL;
 
 #ifdef CONFIG_PSN_EDF_QPA
-	if (get_capability(t))
-		cap_dbf_destroy(get_capability(t));
+	if (get_cap_provider(t))
+		cap_dbf_destroy(get_cap_provider(t));
 #endif
 
 	TRACE_TASK(t, "RIP, now reschedule\n");
@@ -646,7 +646,6 @@ static long psnedf_admit_task(struct task_struct *tsk)
 	d = get_rt_relative_deadline(tsk);
 
 	pr_info("trying to admit task with e=%lld, p=%lld, d=%lld\n", e, p, d);
-
 
 	tcap = cap_dbf_create(e, p, d, pedf->max_cap_id, &pedf->top, tsk, 0);
 	if (!tcap) {

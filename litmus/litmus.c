@@ -438,7 +438,7 @@ asmlinkage long sys_cap_assign(int cpu, int cap_id, pid_t pid)
 		return -EINVAL;
 	}
 
-	if (get_capability(target)) {
+	if (get_cap_provider(target)) {
 		pr_emerg("task %d already has cap set\n", pid);
 		read_unlock_irq(&tasklist_lock);
 		raw_spin_unlock(&cap_lock);

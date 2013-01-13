@@ -65,8 +65,9 @@ struct rt_task {
 	unsigned int	cpu;
 	unsigned int	priority;
 	task_class_t	cls;
-	budget_policy_t budget_policy; /* ignored by pfair */
-	struct cap_dbf	*cap;		/* only used by QPA */
+	budget_policy_t budget_policy;	/* ignored by pfair */
+	struct cap_dbf	*cap_provider;	/* capacity. only used by QPA */
+	struct cap_dbf	*tcap;		/* task capacity if any */
 };
 
 union np_flag {

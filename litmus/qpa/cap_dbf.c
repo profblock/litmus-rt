@@ -147,7 +147,7 @@ int cap_dbf_destroy(struct cap_dbf *cap)
 	/* TODO */
 	/* Remove RT capability of all children. ie. call destroy on them */
 	if (cap->owner) {
-		set_capability(cap->owner, NULL);
+		set_cap_provider(cap->owner, NULL);
 		/* Revoke RT capabilities of owner task */
 	}
 	kfree(cap);
@@ -163,7 +163,7 @@ void cap_dbf_assign(struct cap_dbf *cap, struct task_struct *tsk)
 		kfree(tsk->cap);
 	}
 #endif
-	set_capability(tsk, cap);
+	set_cap_provider(tsk, cap);
 	cap->owner = tsk;
 }
 
