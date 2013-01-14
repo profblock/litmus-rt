@@ -1,10 +1,12 @@
 #ifndef LITMUS_HSCHED_H
 #define LITMUS_HSCHED_H
 
-#include <linux/list.h>
-
 #define DBF_NPOINTS	100		/* user-configurable number of points */
 #define PRECISION	1000		/* minimum slope is 0.001 */
+
+#ifdef __KERNEL__
+
+#include <linux/list.h>
 
 /*
  * IMPORTANT NOTE: ALL FUNCTIONS RELATED TO DBF's ASSUME CORRECT AND
@@ -80,5 +82,7 @@ int dbf_less_than(struct dbf *a, struct dbf *b);
 void dbf_delete_point(struct dbf *dbf, int unsigned idx);
 /* clear a DBF structure (only the points inside) */
 void dbf_clear(struct dbf *dbf);
+
+#endif
 
 #endif

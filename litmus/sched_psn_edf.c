@@ -384,8 +384,10 @@ static void psnedf_task_exit(struct task_struct * t)
 		pedf->scheduled = NULL;
 
 #ifdef CONFIG_PSN_EDF_QPA
+#if 0
 	if (get_cap_provider(t))
 		cap_dbf_destroy(get_cap_provider(t));
+#endif
 #endif
 
 	TRACE_TASK(t, "RIP, now reschedule\n");
@@ -626,6 +628,7 @@ static long psnedf_admit_task(struct task_struct *tsk)
 	unsigned long flags;
 	psnedf_domain_t *pedf = task_pedf(tsk);
 	struct cap_dbf *tcap;
+	struct cap_dbf *parent;
 #endif
 
 	if (!(task_cpu(tsk) == tsk->rt_param.task_params.cpu
@@ -634,10 +637,37 @@ static long psnedf_admit_task(struct task_struct *tsk)
 	     && task_cpu(tsk) != remote_edf(task_cpu(tsk))->release_master
 #endif
 		)) {
+		pr_emerg("\nDOH\n");
 		return -EINVAL;
 	}
 
 #ifdef CONFIG_PSN_EDF_QPA
+	parent = get_cap_provider(tsk);
+	if (!parent) {
+		/* try looking up the tree for capacities */
+		struct task_struct *tmp;
+		
+		tmp = tsk->parent;
+
+		while (tmp && tmp->pid != 1) {
+			pr_info("found parent %d\n", tmp->pid);
+			if (get_cap_provider(tmp)) {
+				parent = get_cap_provider(tmp);
+				break;
+			}
+			tmp = tmp->parent;
+		}
+
+		if (!parent) {
+			pr_err("failed to find suitable capacity provider\n");
+			return -EINVAL;
+		}
+
+		pr_info("found cap provider (pid: %d)\n", tmp->pid);
+	} else {
+		pr_info("found existing cap_provider\n");
+	}
+
 	raw_spin_lock_irqsave(&pedf->slock, flags);
 
 	/* Do a QPA with the top level */
@@ -647,7 +677,7 @@ static long psnedf_admit_task(struct task_struct *tsk)
 
 	pr_info("trying to admit task with e=%lld, p=%lld, d=%lld\n", e, p, d);
 
-	tcap = cap_dbf_create(e, p, d, pedf->max_cap_id, &pedf->top, tsk, 0);
+	tcap = cap_dbf_create(e, p, d, pedf->max_cap_id, parent, tsk, 0);
 	if (!tcap) {
 		pr_info("failed to allocate new capability. OOM.\n");
 		raw_spin_unlock_irqrestore(&pedf->slock, flags);
@@ -655,7 +685,7 @@ static long psnedf_admit_task(struct task_struct *tsk)
 	}
 	pedf->max_cap_id++;
 
-	if (cap_dbf_split(&pedf->top, tcap) < 0) {
+	if (cap_dbf_split(parent, tcap) < 0) {
 		pr_err("failed to admit task\n");
 		cap_dbf_destroy(tcap);
 		raw_spin_unlock_irqrestore(&pedf->slock, flags);
