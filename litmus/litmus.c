@@ -332,7 +332,7 @@ asmlinkage long sys_cap_split(int cpu, int p_id, unsigned long long e,
 {
 	int nid;
 	struct cap_dbf *top;
-	struct cap_dbf *parent;
+	struct cap_dbf *parent = NULL;
 	struct cap_dbf *new;
 
 	raw_spin_lock(&cap_lock);
@@ -343,11 +343,34 @@ asmlinkage long sys_cap_split(int cpu, int p_id, unsigned long long e,
 
 	/* Find target DBF by walking cap tree */
 	top = &per_cpu(top_cap, cpu);
-	parent = cap_dbf_find(top, p_id);
-	if (!parent) {
-		pr_emerg("parent is invalid\n");
-		raw_spin_unlock(&cap_lock);
-		return -EINVAL;
+	if (p_id >= 0) {
+		parent = cap_dbf_find(top, p_id);
+		if (!parent) {
+			pr_emerg("parent is invalid\n");
+			raw_spin_unlock(&cap_lock);
+			return -EINVAL;
+		}
+	} else {
+		/* no parent specified, traverse task tree and split */
+		struct task_struct *tmp;
+		
+		tmp = current->parent;
+
+		while (tmp && tmp->pid != 1) {
+			if (get_cap_provider(tmp, cpu)) {
+				parent = get_cap_provider(tmp, cpu);
+				break;
+			}
+			tmp = tmp->parent;
+		}
+
+		if (!parent) {
+			pr_err("failed to find suitable capacity provider\n");
+			raw_spin_unlock(&cap_lock);
+			return -EINVAL;
+		}
+
+		pr_info("found cap provider (pid: %d)\n", tmp->pid);
 	}
 
 	/* We found the parent. Create a capability */
@@ -418,7 +441,6 @@ asmlinkage long sys_cap_assign(int cpu, int cap_id, pid_t pid)
 		return -ESRCH;
 	}
 
-
 	if (is_realtime(target)) {
 		/* The task is already a real-time task.
 		 * We cannot not allow parameter changes at this point.
@@ -429,6 +451,7 @@ asmlinkage long sys_cap_assign(int cpu, int cap_id, pid_t pid)
 		return -EINVAL;
 	}
 
+#if 0
 	/* make sure the task we assign to is on the right processor */
 	if (task_cpu(target) != cpu) {
 		pr_emerg("task partition not correct cpu=%d, part=%d\n",
@@ -437,8 +460,9 @@ asmlinkage long sys_cap_assign(int cpu, int cap_id, pid_t pid)
 		raw_spin_unlock(&cap_lock);
 		return -EINVAL;
 	}
+#endif
 
-	if (get_cap_provider(target)) {
+	if (get_cap_provider(target, cpu)) {
 		pr_emerg("task %d already has cap set\n", pid);
 		read_unlock_irq(&tasklist_lock);
 		raw_spin_unlock(&cap_lock);
@@ -448,7 +472,8 @@ asmlinkage long sys_cap_assign(int cpu, int cap_id, pid_t pid)
 	pr_emerg("task %d found on partition %d\n", pid, cpu);
 
 	/* Assign the cap to it and vice versa */
-	cap_dbf_assign(cap, target);
+	set_cap_provider(target, cpu, cap);
+	cap->owner = target;
 
 	read_unlock_irq(&tasklist_lock);
 	raw_spin_unlock(&cap_lock);
@@ -457,14 +482,14 @@ asmlinkage long sys_cap_assign(int cpu, int cap_id, pid_t pid)
 
 asmlinkage long sys_cap_revoke(int cpu, int cap_id)
 {
-	raw_spin_lock(&cap_lock);
-	cap_check_first_call();
-
-	/* Find CPU structure */
 	struct cap_dbf *top;
 	struct cap_dbf *cap;
 	struct task_struct *target;
 
+	raw_spin_lock(&cap_lock);
+	cap_check_first_call();
+
+	/* Find CPU structure */
 	raw_spin_lock(&cap_lock);
 	cap_check_first_call();
 

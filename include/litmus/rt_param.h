@@ -37,6 +37,8 @@ typedef enum {
 #include <litmus/dbf.h>
 #include <litmus/cap_dbf.h>
 
+#include <linux/threads.h>
+
 /* We use the common priority interpretation "lower index == higher priority",
  * which is commonly used in fixed-priority schedulability analysis papers.
  * So, a numerically lower priority value implies higher scheduling priority,
@@ -66,7 +68,7 @@ struct rt_task {
 	unsigned int	priority;
 	task_class_t	cls;
 	budget_policy_t budget_policy;	/* ignored by pfair */
-	struct cap_dbf	*cap_provider;	/* capacity. only used by QPA */
+	struct cap_dbf	*cap_provider[NR_CPUS];	/* capacity. only used by QPA */
 	struct cap_dbf	*tcap;		/* task capacity if any */
 };
 

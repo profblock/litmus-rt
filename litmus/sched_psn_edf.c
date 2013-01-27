@@ -642,7 +642,7 @@ static long psnedf_admit_task(struct task_struct *tsk)
 	}
 
 #ifdef CONFIG_PSN_EDF_QPA
-	parent = get_cap_provider(tsk);
+	parent = get_cap_provider(tsk, task_cpu(tsk));
 	if (!parent) {
 		/* try looking up the tree for capacities */
 		struct task_struct *tmp;
@@ -651,8 +651,9 @@ static long psnedf_admit_task(struct task_struct *tsk)
 
 		while (tmp && tmp->pid != 1) {
 			pr_info("found parent %d\n", tmp->pid);
-			if (get_cap_provider(tmp)) {
-				parent = get_cap_provider(tmp);
+			if (get_cap_provider(tmp, task_cpu(tsk))) {
+				parent = get_cap_provider(tmp, task_cpu(tsk));
+				set_cap_provider(tsk, task_cpu(tsk), parent);
 				break;
 			}
 			tmp = tmp->parent;
