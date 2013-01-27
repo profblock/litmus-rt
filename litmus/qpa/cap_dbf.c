@@ -102,38 +102,30 @@ istrue:
 
 int cap_dbf_split(struct cap_dbf *parent, struct cap_dbf *child)
 {
+#if 0
 	struct dbf tmp;
 	struct dbf sum;
+#endif
 	struct cap_dbf *c;
 
-	/* 2 cases: top level or leaf level */
-	if (parent->flags & CAPABILITY_TOP_LEVEL) {
-		int ret;
-		ret = do_schedulability_check(parent, child);
-		if (ret < 0) {
-			pr_info("top level split failed. QPA check failed\n");
-			return ret;
-		}
-	} else {
-		/*
-		 * we only check the child DBFs since we want the DBF and task
-		 * trees completely independent
-		 */
-		pr_info("non top-level split requested\n");
-		dbf_init_dup(&sum, &child->dbf);
-		list_for_each_entry(c, &parent->children, list) {
-			dbf_add(&tmp, &sum, &c->dbf);
-			dbf_init_dup(&sum, &tmp);
-		}
-
-		if (!dbf_less_than(&sum, &parent->dbf)) {
-			pr_info("failed to admit task. DBF violates parent\n");
-			dbf_clear(&sum);
-			return -1;
-		}
-
-		dbf_clear(&sum);
+	/*
+	 * we only check the child DBFs since we want the DBF and task
+	 * trees completely independent
+	 */
+	pr_info("split requested\n");
+	dbf_init_dup(&sum, &child->dbf);
+	list_for_each_entry(c, &parent->children, list) {
+		dbf_add(&tmp, &sum, &c->dbf);
+		dbf_init_dup(&sum, &tmp);
 	}
+
+	if (!dbf_less_than(&sum, &parent->dbf)) {
+		pr_info("failed to admit task. DBF violates parent\n");
+		dbf_clear(&sum);
+		return -1;
+	}
+
+	dbf_clear(&sum);
 
 	pr_info("successfully admitted task\n");
 
@@ -149,7 +141,8 @@ int cap_dbf_destroy(struct cap_dbf *cap)
 	/* Remove RT capability of all children. ie. call destroy on them */
 	if (cap->owner) {
 		for (i = 0; i < NR_CPUS; i++)
-			set_cap_provider(cap->owner, i, NULL);
+			if (get_cap_provider(cap->owner, i) == cap)
+				set_cap_provider(cap->owner, i, NULL);
 		/* TODO: Revoke RT capabilities of owner task */
 	}
 	kfree(cap);

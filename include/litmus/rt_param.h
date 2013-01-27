@@ -37,7 +37,12 @@ typedef enum {
 #include <litmus/dbf.h>
 #include <litmus/cap_dbf.h>
 
+#ifdef __KERNEL__
 #include <linux/threads.h>
+#else
+/* as defined in the config on litmus website :-/ */
+#define NR_CPUS	24
+#endif
 
 /* We use the common priority interpretation "lower index == higher priority",
  * which is commonly used in fixed-priority schedulability analysis papers.

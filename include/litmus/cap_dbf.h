@@ -32,6 +32,16 @@ int cap_dbf_destroy(struct cap_dbf *cap);
 void cap_dbf_assign(struct cap_dbf *cap, struct task_struct *tsk);
 struct cap_dbf *cap_dbf_find(struct cap_dbf *parent, int id);
 
+struct qpa_task {
+	lt_t e;
+	lt_t p;
+	lt_t d;
+	slope_t u;
+	struct list_head list;
+};
+
+int do_qpa_check(int cpu);
+
 #endif /* __KERNEL__ */
 
 #endif

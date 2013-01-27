@@ -678,7 +678,9 @@ static long psnedf_admit_task(struct task_struct *tsk)
 
 	pr_info("trying to admit task with e=%lld, p=%lld, d=%lld\n", e, p, d);
 
-	tcap = cap_dbf_create(e, p, d, pedf->max_cap_id, parent, tsk, 0);
+	/* create a leaf-level capability for this task */
+	tcap = cap_dbf_create(e, p, d, pedf->max_cap_id, parent, tsk,
+		CAPABILITY_LEAF_LEVEL);
 	if (!tcap) {
 		pr_info("failed to allocate new capability. OOM.\n");
 		raw_spin_unlock_irqrestore(&pedf->slock, flags);
@@ -688,6 +690,15 @@ static long psnedf_admit_task(struct task_struct *tsk)
 
 	if (cap_dbf_split(parent, tcap) < 0) {
 		pr_err("failed to admit task\n");
+		cap_dbf_destroy(tcap);
+		raw_spin_unlock_irqrestore(&pedf->slock, flags);
+		return -EPERM;
+	}
+
+	/* Split worked fine! Now do QPA to make sure! */
+	if (do_qpa_check(task_cpu(tsk)) < 0) {
+		/* Whoops. Undo all the crap you just did */
+		list_del(&tcap->list);
 		cap_dbf_destroy(tcap);
 		raw_spin_unlock_irqrestore(&pedf->slock, flags);
 		return -EPERM;

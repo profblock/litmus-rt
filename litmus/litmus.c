@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/reboot.h>
+#include <linux/list.h>
 
 #include <litmus/litmus.h>
 #include <litmus/bheap.h>
@@ -327,6 +328,185 @@ void cap_check_first_call(void)
 	}
 }
 
+int build_task_list(struct list_head *head, struct cap_dbf *parent)
+{
+	int ret;
+	struct cap_dbf *tmp;
+	struct qpa_task *next;
+	struct qpa_task *ttmp;
+
+	list_for_each_entry(tmp, &parent->children, list) {
+		if (tmp->flags & CAPABILITY_LEAF_LEVEL) {
+			struct qpa_task *nt;
+
+			/* weird error */
+			if (!tmp->owner) {
+				ret = -1;
+				goto done;
+			}
+
+			nt = kmalloc(sizeof(struct qpa_task), GFP_KERNEL);
+			if (!nt) {
+				ret = -1;
+				goto done;
+			}
+
+			nt->e = get_exec_cost(tmp->owner);
+			nt->p = get_rt_period(tmp->owner);
+			nt->d = get_rt_relative_deadline(tmp->owner);
+			nt->u = tmp->dbf.slope;
+
+			list_add(&nt->list, head);
+
+			pr_info("QPA found task: %d\n", tmp->owner->pid);
+		} else {
+			if (build_task_list(head, tmp) < 0)
+				return -1;
+		}
+	}
+	
+	return 0;
+
+done:
+	list_for_each_entry_safe(ttmp, next, head, list) {
+		list_del(&ttmp->list);
+		kfree(ttmp);
+	}
+
+	return ret;
+}
+
+lt_t qpa_get_demand(struct list_head *head, lt_t t)
+{
+	long long calc;
+	lt_t demand = 0;
+	struct qpa_task *tmp;
+
+	list_for_each_entry(tmp, head, list) {
+		calc = (1 + (t - tmp->d)/tmp->p);
+		if (calc < 0)
+			calc = 0;
+		demand += calc;
+	}
+
+	return 0;
+}
+
+lt_t qpa_get_max_d(struct list_head *head, lt_t t)
+{
+	struct qpa_task *tmp;
+	lt_t dmax = 0;
+	lt_t dj;
+
+	list_for_each_entry(tmp, head, list) {
+		if (tmp->d < t) {
+			dj = ((t - tmp->d)/tmp->p)*tmp->p + tmp->d;
+			if (dj == t)
+				dj = dj - tmp->p;
+			if (dj > dmax)
+				dmax = dj;
+		}
+	}
+
+	return dmax;
+}
+
+lt_t qpa_get_min_d(struct list_head *head)
+{
+	struct qpa_task *tmp;
+	lt_t min = (lt_t)(-1);
+
+	list_for_each_entry(tmp, head, list) {
+		if (tmp->d < min)
+			min = tmp->d;
+	}
+
+	return 0;
+}
+
+lt_t qpa_get_l(struct list_head *head, lt_t U)
+{
+	struct qpa_task *t;
+	lt_t max_la = 0;
+	lt_t l_a_weird = 0;
+
+	/* Calculate L_a */
+	list_for_each_entry(t, head, list) {
+		if ((t->d - t->p) > max_la)
+			max_la = t->d - t->p;
+	}
+	list_for_each_entry(t, head, list)
+		l_a_weird += (t->p - t->d)*t->u;
+	l_a_weird = l_a_weird / (PRECISION - U);
+	if (l_a_weird > max_la)
+		max_la = l_a_weird;
+	
+	return max_la;
+}
+
+int do_qpa_check(int cpu)
+{
+	struct cap_dbf *top;
+	struct list_head tasks;
+	struct qpa_task *tmp;
+	slope_t U = 0;
+	lt_t l_a = 0;
+	lt_t min_d = 0;
+	lt_t t;
+	lt_t demand = 0;
+	int ret = 0;
+
+	raw_spin_lock(&cap_lock);
+
+	INIT_LIST_HEAD(&tasks);
+	top = &per_cpu(top_cap, cpu);
+	if (build_task_list(&tasks, top) < 0) {
+		pr_err("failed to build task set\n");
+		raw_spin_unlock(&cap_lock);
+		return ret;
+	}
+
+	/* calculate utilization */
+	list_for_each_entry(tmp, &tasks, list)
+		U += tmp->u;
+	if (U >= PRECISION) {
+		ret = -1;
+		goto done;
+	}
+
+	l_a = qpa_get_l(&tasks, U);
+	min_d = qpa_get_min_d(&tasks);
+	t = qpa_get_max_d(&tasks, l_a);
+
+	while (1) {
+		lt_t demand;
+
+		demand = qpa_get_demand(&tasks, t);
+		if (demand > t || demand <= min_d)
+			break;
+
+		if (demand < t)
+			t = demand;
+		else
+			t = qpa_get_max_d(&tasks, t);
+	}
+
+	if (demand <= min_d)
+		ret = 0;
+	else
+		ret = -1;
+
+done:
+	list_for_each_entry(tmp, &tasks, list) {
+		list_del(&tmp->list);
+		kfree(tmp);
+	}
+
+	raw_spin_unlock(&cap_lock);
+
+	return ret;
+}
+
 asmlinkage long sys_cap_split(int cpu, int p_id, unsigned long long e,
 	unsigned long long p, unsigned long long d)
 {
@@ -354,7 +534,8 @@ asmlinkage long sys_cap_split(int cpu, int p_id, unsigned long long e,
 		/* no parent specified, traverse task tree and split */
 		struct task_struct *tmp;
 		
-		tmp = current->parent;
+		/* start from requesting current task and work backwards */
+		tmp = current;
 
 		while (tmp && tmp->pid != 1) {
 			if (get_cap_provider(tmp, cpu)) {
@@ -484,7 +665,7 @@ asmlinkage long sys_cap_revoke(int cpu, int cap_id)
 {
 	struct cap_dbf *top;
 	struct cap_dbf *cap;
-	struct task_struct *target;
+	//struct task_struct *target;
 
 	raw_spin_lock(&cap_lock);
 	cap_check_first_call();
