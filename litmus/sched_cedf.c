@@ -256,10 +256,8 @@ static noinline void requeue(struct task_struct* task)
 
 	if (is_released(task, litmus_clock()))
 		__add_ready(&cluster->domain, task);
-	else {
-		/* it has got to wait */
-		add_release(&cluster->domain, task);
-	}
+	else
+		TRACE_TASK(task, "not requeueing not-yet-released job\n");
 }
 
 #ifdef CONFIG_SCHED_CPU_AFFINITY
@@ -343,6 +341,9 @@ static void cedf_release_jobs(rt_domain_t* rt, struct bheap* tasks)
 /* caller holds cedf_lock */
 static noinline void job_completion(struct task_struct *t, int forced)
 {
+	cedf_domain_t *cluster = task_cpu_cluster(t);
+	lt_t now;
+
 	BUG_ON(!t);
 
 	sched_trace_task_completion(t, forced);
@@ -353,14 +354,20 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	tsk_rt(t)->completed = 1;
 	/* prepare for next period */
 	prepare_for_next_period(t);
-	if (is_released(t, litmus_clock()))
+	now = litmus_clock();
+	if (is_released(t, now))
 		sched_trace_task_release(t);
 	/* unlink */
 	unlink(t);
 	/* requeue
 	 * But don't requeue a blocking task. */
-	if (is_running(t))
-		cedf_job_arrival(t);
+	tsk_rt(t)->completed = 0;
+	if (is_running(t)) {
+		if (!is_released(t, now))
+			add_release(&cluster->domain, t);
+		else
+			cedf_job_arrival(t);
+	}
 }
 
 /* cedf_tick - this function is called for every local timer
