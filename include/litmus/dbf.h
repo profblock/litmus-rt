@@ -76,7 +76,7 @@ void dbf_dump(struct dbf *dbf);
 /* add two DBF's and return the resulting DBF */
 int dbf_add(struct dbf *res, struct dbf *a, struct dbf *b);
 /* check if every point in DBF 'b' lies below DBF 'a' and vice versa */
-int dbf_less_than(struct dbf *a, struct dbf *b);
+int dbf_less_than(struct dbf *a, struct dbf *b, int top_level);
 
 /* clear a single point in a DBF structure (by index) */
 void dbf_delete_point(struct dbf *dbf, int unsigned idx);

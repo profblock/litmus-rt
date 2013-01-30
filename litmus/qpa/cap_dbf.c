@@ -107,6 +107,7 @@ int cap_dbf_split(struct cap_dbf *parent, struct cap_dbf *child)
 	struct dbf sum;
 #endif
 	struct cap_dbf *c;
+	int top_level = 0;
 
 	/*
 	 * we only check the child DBFs since we want the DBF and task
@@ -119,7 +120,10 @@ int cap_dbf_split(struct cap_dbf *parent, struct cap_dbf *child)
 		dbf_init_dup(&sum, &tmp);
 	}
 
-	if (!dbf_less_than(&sum, &parent->dbf)) {
+	if (parent->flags & CAPABILITY_TOP_LEVEL)
+		top_level = 1;
+
+	if (!dbf_less_than(&sum, &parent->dbf, top_level)) {
 		pr_info("failed to admit task. DBF violates parent\n");
 		dbf_clear(&sum);
 		return -1;

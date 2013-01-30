@@ -860,6 +860,8 @@ out:
  */
 void litmus_fork(struct task_struct* p)
 {
+	int i;
+
 	if (is_realtime(p)) {
 		/* clean out any litmus related state, don't preserve anything */
 		reinit_litmus_state(p, 0);
@@ -871,6 +873,11 @@ void litmus_fork(struct task_struct* p)
 
 	/* od tables are never inherited across a fork */
 	p->od_table = NULL;
+
+	/* Capacity data of every task should be initialized as null */
+	for(i = 0; i < NR_CPUS; i++)
+		set_cap_provider(p, i, NULL);
+	set_rt_capability(p, NULL);
 }
 
 /* Called upon execve().

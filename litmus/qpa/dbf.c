@@ -155,7 +155,7 @@ int dbf_point_at(struct point *r, struct dbf *dbf, lt_t x, int opts)
 
 	if (!r)
 		return -1;
-
+	
 	/* get the last point before the requested coordinate */
 	for (i = 0; i < dbf->npoints; i++) {
 		p = &dbf->points[i];
@@ -267,7 +267,7 @@ int dbf_add(struct dbf *res, struct dbf *a, struct dbf *b)
 	return 0;
 }
 
-int dbf_less_than(struct dbf *a, struct dbf *b)
+int dbf_less_than(struct dbf *a, struct dbf *b, int top_level)
 {
 	unsigned int i;
 
@@ -281,7 +281,13 @@ int dbf_less_than(struct dbf *a, struct dbf *b)
 
 		pa = dbf_get_point(a, i);
 		/* DBF b is floored while DBF a is ceiled */
-		dbf_point_at(&pb, b, pa->x, P_OPT_FLOOR);
+		if (top_level) {
+			/* y = x */
+			pb.x = pa->x;
+			pb.y = pa->x;
+		} else {
+			dbf_point_at(&pb, b, pa->x, P_OPT_FLOOR);
+		}
 
 		if (pa->y > pb.y)
 			return 0;

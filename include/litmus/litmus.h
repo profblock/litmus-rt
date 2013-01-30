@@ -59,6 +59,7 @@ void litmus_exit_task(struct task_struct *tsk);
 #define get_cap_provider(t, cpu)	(tsk_rt(t)->task_params.cap_provider[cpu])
 #define set_cap_provider(t,cpu,c)	(tsk_rt(t)->task_params.cap_provider[cpu] = c)
 #define set_rt_capability(t,c)	(tsk_rt(t)->task_params.tcap = c)
+#define get_rt_capability(t)	(tsk_rt(t)->task_params.tcap)
 
 /* job_param macros */
 #define get_exec_time(t)    (tsk_rt(t)->job_params.exec_time)

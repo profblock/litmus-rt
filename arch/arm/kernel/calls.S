@@ -397,6 +397,9 @@
 /* 385 */	CALL(sys_wait_for_ts_release)
 		CALL(sys_release_ts)
 		CALL(sys_null_call)
+		CALL(sys_cap_split)
+		CALL(sys_cap_assign)
+		CALL(sys_cap_revoke)
 #ifndef syscalls_counted
 .equ syscalls_padding, ((NR_syscalls + 3) & ~3) - NR_syscalls
 #define syscalls_counted
