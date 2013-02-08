@@ -83,6 +83,8 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
 
+#include <litmus/trace.h>
+
 /*
  * Convert user-nice values [ -20 ... 0 ... 19 ]
  * to static priority [ MAX_RT_PRIO..MAX_PRIO-1 ],
@@ -4094,6 +4096,8 @@ void scheduler_tick(void)
 
 	sched_clock_tick();
 
+	TS_TICK_START(current);
+
 	raw_spin_lock(&rq->lock);
 	update_rq_clock(rq);
 	update_cpu_load_active(rq);
@@ -4106,6 +4110,7 @@ void scheduler_tick(void)
 	rq->idle_at_tick = idle_cpu(cpu);
 	trigger_load_balance(rq, cpu);
 #endif
+	TS_TICK_END(current);
 }
 
 notrace unsigned long get_parent_ip(unsigned long addr)
@@ -4258,6 +4263,8 @@ need_resched:
 	rcu_note_context_switch(cpu);
 	prev = rq->curr;
 
+	TS_SCHED_START;
+
 	schedule_debug(prev);
 
 	if (sched_feat(HRTICK))
@@ -4314,7 +4321,10 @@ need_resched:
 		rq->curr = next;
 		++*switch_count;
 
+		TS_SCHED_END(next);
+		TS_CXS_START(next);
 		context_switch(rq, prev, next); /* unlocks the rq */
+		TS_CXS_END(current);
 		/*
 		 * The context switch have flipped the stack from under us
 		 * and restored the local variables which were saved when
@@ -4323,12 +4333,19 @@ need_resched:
 		 */
 		cpu = smp_processor_id();
 		rq = cpu_rq(cpu);
-	} else
+	} else {
+		TS_SCHED_END(prev);
 		raw_spin_unlock_irq(&rq->lock);
+	}
+
+	TS_SCHED2_START(prev);
 
 	post_schedule(rq);
 
 	preempt_enable_no_resched();
+
+	TS_SCHED2_END(prev);
+
 	if (need_resched())
 		goto need_resched;
 }
