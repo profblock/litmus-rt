@@ -39,9 +39,13 @@ typedef enum {
 
 #ifdef __KERNEL__
 #include <linux/threads.h>
+#include <linux/hrtimer.h>
 #else
 /* as defined in the config on litmus website :-/ */
 #define NR_CPUS	24
+struct hrtimer {
+	int dummy;
+};
 #endif
 
 /* We use the common priority interpretation "lower index == higher priority",
@@ -75,6 +79,7 @@ struct rt_task {
 	budget_policy_t budget_policy;	/* ignored by pfair */
 	struct cap_dbf	*cap_provider[NR_CPUS];	/* capacity. only used by QPA */
 	struct cap_dbf	*tcap;		/* task capacity if any */
+	struct hrtimer	cbs_timer;
 };
 
 union np_flag {

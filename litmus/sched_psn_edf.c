@@ -288,6 +288,31 @@ static struct task_struct* psnedf_schedule(struct task_struct * prev)
 	return next;
 }
 
+#define task_from_timer(t) (container_of((t), struct rt_task, cbs_timer))
+
+static enum hrtimer_restart on_cbs_timeout(struct hrtimer *timer)
+{
+	lt_t when_to_fire;
+	struct rt_task *rtt = task_from_timer(timer);
+	struct rt_param *rtp = (container_of((rtt), struct rt_param, task_params));
+	struct task_struct *t = (container_of((rtp), struct task_struct, rt_param));
+
+	if (budget_enforced(t) && budget_exhausted(t)) {
+		pr_emerg("Nicht so whee!\n");
+	} else {
+		pr_emerg("Whee!\n");
+	}
+
+	when_to_fire = litmus_clock() + rtt->period;
+	__hrtimer_start_range_ns(&rtt->cbs_timer,
+		ns_to_ktime(when_to_fire),
+		0 /* delta */,
+		HRTIMER_MODE_ABS_PINNED,
+		0 /* no wakeup */);
+
+	return  HRTIMER_NORESTART;
+}
+
 
 /*	Prepare a task for running in RT mode
  */
@@ -296,12 +321,22 @@ static void psnedf_task_new(struct task_struct * t, int on_rq, int running)
 	rt_domain_t* 		edf  = task_edf(t);
 	psnedf_domain_t* 	pedf = task_pedf(t);
 	unsigned long		flags;
+	lt_t			when_to_fire;
 
 	TRACE_TASK(t, "psn edf: task new, cpu = %d\n",
 		   t->rt_param.task_params.cpu);
 
 	/* setup job parameters */
 	release_at(t, litmus_clock());
+
+	when_to_fire = litmus_clock() + get_rt_period(t);
+	hrtimer_init(&tsk_rt(t)->task_params.cbs_timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
+	tsk_rt(t)->task_params.cbs_timer.function = on_cbs_timeout;
+	__hrtimer_start_range_ns(&tsk_rt(t)->task_params.cbs_timer,
+		ns_to_ktime(when_to_fire),
+		0 /* delta */,
+		HRTIMER_MODE_ABS_PINNED,
+		0 /* no wakeup */);
 
 	/* The task should be running in the queue, otherwise signal
 	 * code will try to wake it up with fatal consequences.
@@ -638,6 +673,8 @@ static long psnedf_admit_task(struct task_struct *tsk)
 		pr_emerg("\nDOH\n");
 		return -EINVAL;
 	}
+
+	return 0;
 
 #ifdef CONFIG_PSN_EDF_QPA
 	parent = get_cap_provider(tsk, task_cpu(tsk));
