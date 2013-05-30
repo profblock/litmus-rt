@@ -5,6 +5,7 @@
 #include <asm/uaccess.h>
 #include <linux/module.h>
 #include <linux/device.h>
+#include <linux/vmalloc.h>
 
 #include <litmus/feather_trace.h>
 #include <litmus/ftdev.h>
@@ -20,13 +21,9 @@ struct ft_buffer* alloc_ft_buffer(unsigned int count, size_t size)
 	if (!buf)
 		return NULL;
 
-	total = (total / PAGE_SIZE) + (total % PAGE_SIZE != 0);
-	while (pages < total) {
-		order++;
-		pages *= 2;
-	}
 
-	mem = (char*) __get_free_pages(GFP_KERNEL, order);
+	mem = vmalloc(total);
+
 	if (!mem) {
 		kfree(buf);
 		return NULL;
@@ -35,7 +32,7 @@ struct ft_buffer* alloc_ft_buffer(unsigned int count, size_t size)
 	if (!init_ft_buffer(buf, count, size,
 			    mem + (count * size),  /* markers at the end */
 			    mem)) {                /* buffer objects     */
-		free_pages((unsigned long) mem, order);
+		vfree(mem);
 		kfree(buf);
 		return NULL;
 	}
@@ -48,13 +45,7 @@ void free_ft_buffer(struct ft_buffer* buf)
 	size_t total;
 
 	if (buf) {
-		total = (buf->slot_size + 1) * buf->slot_count;
-		total = (total / PAGE_SIZE) + (total % PAGE_SIZE != 0);
-		while (pages < total) {
-			order++;
-			pages *= 2;
-		}
-		free_pages((unsigned long) buf->buffer_mem, order);
+		vfree(buf->buffer_mem);
 		kfree(buf);
 	}
 }
