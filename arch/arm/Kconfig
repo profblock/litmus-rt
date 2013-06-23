@@ -2323,5 +2323,8 @@ source "crypto/Kconfig"
 
 source "lib/Kconfig"
 
+config ARCH_HAS_FEATHER_TRACE
+	def_bool n
+
 source "litmus/Kconfig"
 
