@@ -23,6 +23,14 @@ config FEATHER_TRACE
 	  you still need to enable SCHED_TASK_TRACE and/or SCHED_OVERHEAD_TRACE to
 	  actually enable any events.
 
+config SCHED_OVERHEAD_TRACE
+	bool "Record timestamps for overhead measurements"
+	depends on FEATHER_TRACE
+	default n
+	help
+	  Export event stream for overhead tracing.
+	  Say Yes for overhead tracing.
+
 endmenu
 
 endmenu
