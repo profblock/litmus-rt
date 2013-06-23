@@ -364,6 +364,9 @@ asmlinkage void __do_softirq(void)
 	 */
 	current->flags &= ~PF_MEMALLOC;
 
+	/* Mark Feather-Trace samples as "disturbed". */
+	ft_irq_fired();
+
 	pending = local_softirq_pending();
 	vtime_account_irq_enter(current);
 
