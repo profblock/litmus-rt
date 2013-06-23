@@ -65,6 +65,13 @@ int console_printk[4] = {
 };
 
 /*
+ * divert printk() messages when there is a LITMUS^RT debug listener
+ */
+#include <litmus/debug_trace.h>
+int trace_override = 0;
+int trace_recurse  = 0;
+
+/*
  * Low level drivers may need that to know if they can schedule in
  * their unblank() callback or not. So let's export it.
  */
@@ -1629,6 +1636,10 @@ asmlinkage int vprintk_emit(int facility, int level,
 	 * prefix which might be passed-in as a parameter.
 	 */
 	text_len = vscnprintf(text, sizeof(textbuf), fmt, args);
+
+	/* if LITMUS^RT tracer is active divert printk() msgs */
+	if (trace_override && !trace_recurse)
+		TRACE("%s", text_len);
 
 	/* mark and strip a trailing newline */
 	if (text_len && text[text_len-1] == '\n') {
