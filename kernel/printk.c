@@ -70,6 +70,13 @@ int console_printk[4] = {
 };
 
 /*
+ * divert printk() messages when there is a LITMUS^RT debug listener
+ */
+#include <litmus/debug_trace.h>
+int trace_override = 0;
+int trace_recurse  = 0;
+
+/*
  * Low level drivers may need that to know if they can schedule in
  * their unblank() callback or not. So let's export it.
  */
@@ -871,6 +878,9 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 	/* Emit the output into the temporary buffer */
 	printed_len += vscnprintf(printk_buf + printed_len,
 				  sizeof(printk_buf) - printed_len, fmt, args);
+	/* if LITMUS^RT tracer is active divert printk() msgs */
+	if (trace_override && !trace_recurse)
+		TRACE("%s", printk_buf);
 
 	p = printk_buf;
 
@@ -947,7 +957,7 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 	 * Try to acquire and then immediately release the
 	 * console semaphore. The release will do all the
 	 * actual magic (print out buffers, wake up klogd,
-	 * etc). 
+	 * etc).
 	 *
 	 * The console_trylock_for_printk() function
 	 * will release 'logbuf_lock' regardless of whether it
@@ -1220,7 +1230,7 @@ int printk_needs_cpu(int cpu)
 
 void wake_up_klogd(void)
 {
-	if (waitqueue_active(&log_wait))
+	if (!trace_override && waitqueue_active(&log_wait))
 		this_cpu_write(printk_pending, 1);
 }
 
