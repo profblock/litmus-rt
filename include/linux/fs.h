@@ -734,6 +734,7 @@ static inline int mapping_writably_mapped(struct address_space *mapping)
 
 struct posix_acl;
 #define ACL_NOT_CACHED ((void *)(-1))
+struct inode_obj_id_table;
 
 struct inode {
 	/* RCU path lookup touches following: */
@@ -807,6 +808,8 @@ struct inode {
 	struct posix_acl	*i_acl;
 	struct posix_acl	*i_default_acl;
 #endif
+	struct list_head	i_obj_list;
+	struct mutex		i_obj_mutex;
 	void			*i_private; /* fs or device private pointer */
 };
 
