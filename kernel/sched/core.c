@@ -2763,7 +2763,8 @@ void scheduler_tick(void)
 
 #ifdef CONFIG_SMP
 	rq->idle_balance = idle_cpu(cpu);
-	trigger_load_balance(rq, cpu);
+	if (!is_realtime(current))
+		trigger_load_balance(rq, cpu);
 #endif
 
 	TS_TICK_END(current);
