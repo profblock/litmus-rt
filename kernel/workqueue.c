@@ -41,6 +41,8 @@
 #include <linux/debug_locks.h>
 #include <linux/lockdep.h>
 #include <linux/idr.h>
+#include <linux/locallock.h>
+#include <linux/delay.h>
 
 #include "workqueue_sched.h"
 
@@ -277,6 +279,8 @@ struct workqueue_struct *system_unbound_wq __read_mostly;
 EXPORT_SYMBOL_GPL(system_unbound_wq);
 struct workqueue_struct *system_freezable_wq __read_mostly;
 EXPORT_SYMBOL_GPL(system_freezable_wq);
+
+static DEFINE_LOCAL_IRQ_LOCK(pendingb_lock);
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/workqueue.h>
@@ -1092,7 +1096,7 @@ static int try_to_grab_pending(struct work_struct *work, bool is_dwork,
 {
 	struct global_cwq *gcwq;
 
-	local_irq_save(*flags);
+	local_lock_irqsave(pendingb_lock, *flags);
 
 	/* try to steal the timer if it exists */
 	if (is_dwork) {
@@ -1151,10 +1155,10 @@ static int try_to_grab_pending(struct work_struct *work, bool is_dwork,
 	}
 	spin_unlock(&gcwq->lock);
 fail:
-	local_irq_restore(*flags);
+	local_unlock_irqrestore(pendingb_lock, *flags);
 	if (work_is_canceling(work))
 		return -ENOENT;
-	cpu_relax();
+	cpu_chill();
 	return -EAGAIN;
 }
 
@@ -1246,7 +1250,7 @@ static void __queue_work(unsigned int cpu, struct workqueue_struct *wq,
 	 * queued or lose PENDING.  Grabbing PENDING and queueing should
 	 * happen with IRQ disabled.
 	 */
-	WARN_ON_ONCE(!irqs_disabled());
+	WARN_ON_ONCE_NONRT(!irqs_disabled());
 
 	debug_work_activate(work);
 
@@ -1336,14 +1340,14 @@ bool queue_work_on(int cpu, struct workqueue_struct *wq,
 	bool ret = false;
 	unsigned long flags;
 
-	local_irq_save(flags);
+	local_lock_irqsave(pendingb_lock,flags);
 
 	if (!test_and_set_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(work))) {
 		__queue_work(cpu, wq, work);
 		ret = true;
 	}
 
-	local_irq_restore(flags);
+	local_unlock_irqrestore(pendingb_lock, flags);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(queue_work_on);
@@ -1451,14 +1455,14 @@ bool queue_delayed_work_on(int cpu, struct workqueue_struct *wq,
 	unsigned long flags;
 
 	/* read the comment in __queue_work() */
-	local_irq_save(flags);
+	local_lock_irqsave(pendingb_lock, flags);
 
 	if (!test_and_set_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(work))) {
 		__queue_delayed_work(cpu, wq, dwork, delay);
 		ret = true;
 	}
 
-	local_irq_restore(flags);
+	local_unlock_irqrestore(pendingb_lock, flags);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(queue_delayed_work_on);
@@ -1508,7 +1512,7 @@ bool mod_delayed_work_on(int cpu, struct workqueue_struct *wq,
 
 	if (likely(ret >= 0)) {
 		__queue_delayed_work(cpu, wq, dwork, delay);
-		local_irq_restore(flags);
+		local_unlock_irqrestore(pendingb_lock, flags);
 	}
 
 	/* -ENOENT from try_to_grab_pending() becomes %true */
@@ -1634,8 +1638,11 @@ __acquires(&gcwq->lock)
 		 * it races with cpu hotunplug operation.  Verify
 		 * against GCWQ_DISASSOCIATED.
 		 */
-		if (!(gcwq->flags & GCWQ_DISASSOCIATED))
+		if (!(gcwq->flags & GCWQ_DISASSOCIATED)) {
 			set_cpus_allowed_ptr(task, get_cpu_mask(gcwq->cpu));
+			if (WARN_ON(!(task->flags & PF_THREAD_BOUND)))
+				task->flags |= PF_THREAD_BOUND;
+		}
 
 		spin_lock_irq(&gcwq->lock);
 		if (gcwq->flags & GCWQ_DISASSOCIATED)
@@ -2936,7 +2943,7 @@ static bool __cancel_work_timer(struct work_struct *work, bool is_dwork)
 
 	/* tell other tasks trying to grab @work to back off */
 	mark_work_canceling(work);
-	local_irq_restore(flags);
+	local_unlock_irqrestore(pendingb_lock, flags);
 
 	flush_work(work);
 	clear_work_data(work);
@@ -2981,11 +2988,11 @@ EXPORT_SYMBOL_GPL(cancel_work_sync);
  */
 bool flush_delayed_work(struct delayed_work *dwork)
 {
-	local_irq_disable();
+	local_lock_irq(pendingb_lock);
 	if (del_timer_sync(&dwork->timer))
 		__queue_work(dwork->cpu,
 			     get_work_cwq(&dwork->work)->wq, &dwork->work);
-	local_irq_enable();
+	local_unlock_irq(pendingb_lock);
 	return flush_work(&dwork->work);
 }
 EXPORT_SYMBOL(flush_delayed_work);
@@ -3015,7 +3022,7 @@ bool cancel_delayed_work(struct delayed_work *dwork)
 		return false;
 
 	set_work_cpu_and_clear_pending(&dwork->work, work_cpu(&dwork->work));
-	local_irq_restore(flags);
+	local_unlock_irqrestore(pendingb_lock, flags);
 	return ret;
 }
 EXPORT_SYMBOL(cancel_delayed_work);
