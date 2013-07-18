@@ -5,6 +5,7 @@
 #include <linux/sched.h>
 #include <linux/uaccess.h>
 #include <linux/seq_file.h>
+#include <linux/proc_fs.h>
 
 #include <litmus/litmus.h>
 #include <litmus/litmus_proc.h>
@@ -35,6 +36,21 @@ static int litmus_stats_proc_show(struct seq_file *m, void *v)
 		   count_tasks_waiting_for_release());
 	return 0;
 }
+
+
+/* BACK-PORTING HACK: remove next 2 functions when porting forward  */
+static inline void *PDE_DATA(const struct inode *inode)
+{
+	return PDE(inode)->data;
+}
+
+static inline struct inode *file_inode(struct file *f)
+{
+	return f->f_dentry->d_inode;
+}
+
+/* HACK END */
+
 
 static int litmus_stats_proc_open(struct inode *inode, struct file *file)
 {
