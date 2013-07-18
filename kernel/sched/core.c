@@ -89,6 +89,7 @@
 #include <litmus/trace.h>
 #include <litmus/sched_trace.h>
 #include <litmus/sched_plugin.h>
+#include <litmus/litmus.h>
 
 void litmus_tick(struct rq*, struct task_struct*);
 
