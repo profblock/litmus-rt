@@ -71,6 +71,23 @@ typedef enum {
 	((p) >= LITMUS_HIGHEST_PRIORITY &&	\
 	 (p) <= LITMUS_LOWEST_PRIORITY)
 
+
+/* For tasks that have multiple services, the work is given in relative terms
+ * based off how much work it should take compared to level 0 (the lowest level)
+ * So, if a task just completed a job at service level 0 in 20 ms then 
+ * if it had run that same job in service level 3 with a relative work of 2.1, then
+ * it would have take 2.1*20 = 42ms to complete. 
+ * Quality of service is an absolute measurement. The higher the number, the better.
+ * 
+ * NOTE (1): relative_work for service level 0 is always assumed to be 1.
+ * NOTE (2): Each service must take more work and have a higher quality of service */
+struct rt_service_level{
+ 	double relative_work;
+	double quality_of_service;
+	unsigned int service_level_number;
+};
+
+
 struct rt_task {
 	lt_t 		exec_cost;
 	lt_t 		period;
@@ -81,6 +98,10 @@ struct rt_task {
 	task_class_t	cls;
 	budget_policy_t  budget_policy;  /* ignored by pfair */
 	release_policy_t release_policy;
+	
+	/* adaptive tasks may have multiple service levels */	
+	struct rt_service_level* service_levels;
+
 };
 
 union np_flag {
@@ -121,6 +142,10 @@ struct control_page {
 	uint64_t irq_syscall_start; /* Snapshot of irq_count when the syscall
 				     * started. */
 
+	/* Used by adaptive algorithms that can operate at multiple levels of 
+	 * service. Level 0 is the lowest service level. */
+	volatile unsigned int service_level;
+	
 	/* to be extended */
 };
 
