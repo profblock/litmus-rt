@@ -1,5 +1,5 @@
 /*
- * litmus/sched_gsn_edf.c
+ * litmus/sched_agsn_edf.c
  *
  * Implementation of the GSN-EDF scheduling algorithm.
  *
@@ -53,7 +53,7 @@
  * unlink(T)			- Unlink removes T from all scheduler data
  *                                structures. If it is linked to some CPU it
  *                                will link NULL to that CPU. If it is
- *                                currently queued in the gsnedf queue it will
+ *                                currently queued in the agsnedf queue it will
  *                                be removed from the rt_domain. It is safe to
  *                                call unlink(T) if T is not linked. T may not
  *                                be NULL.
@@ -70,16 +70,16 @@
  *                                called. It is not safe to call requeue(T)
  *                                when T is already queued. T may not be NULL.
  *
- * gsnedf_job_arrival(T)	- This is the catch all function when T enters
+ * agsnedf_job_arrival(T)	- This is the catch all function when T enters
  *                                the system after either a suspension or at a
  *                                job release. It will queue T (which means it
- *                                is not safe to call gsnedf_job_arrival(T) if
+ *                                is not safe to call agsnedf_job_arrival(T) if
  *                                T is already queued) and then check whether a
  *                                preemption is necessary. If a preemption is
  *                                necessary it will update the linkage
  *                                accordingly and cause scheduled to be called
  *                                (either with an IPI or need_resched). It is
- *                                safe to call gsnedf_job_arrival(T) if T's
+ *                                safe to call agsnedf_job_arrival(T) if T's
  *                                next job has not been actually released yet
  *                                (releast time in the future). T will be put
  *                                on the release queue in that case.
@@ -87,7 +87,7 @@
  * job_completion(T)		- Take care of everything that needs to be done
  *                                to prepare T for its next release and place
  *                                it in the right queue with
- *                                gsnedf_job_arrival().
+ *                                agsnedf_job_arrival().
  *
  *
  * When we now that T is linked to CPU then link_task_to_cpu(NULL, CPU) is
@@ -106,16 +106,16 @@ typedef struct  {
 	struct task_struct*	scheduled;	/* only RT tasks */
 	struct bheap_node*	hn;
 } cpu_entry_t;
-DEFINE_PER_CPU(cpu_entry_t, gsnedf_cpu_entries);
+DEFINE_PER_CPU(cpu_entry_t, agsnedf_cpu_entries);
 
-cpu_entry_t* gsnedf_cpus[NR_CPUS];
+cpu_entry_t* agsnedf_cpus[NR_CPUS];
 
 /* the cpus queue themselves according to priority in here */
-static struct bheap_node gsnedf_heap_node[NR_CPUS];
-static struct bheap      gsnedf_cpu_heap;
+static struct bheap_node agsnedf_heap_node[NR_CPUS];
+static struct bheap      agsnedf_cpu_heap;
 
-static rt_domain_t gsnedf;
-#define gsnedf_lock (gsnedf.ready_lock)
+static rt_domain_t agsnedf;
+#define agsnedf_lock (agsnedf.ready_lock)
 
 
 /* Uncomment this if you want to see all scheduling decisions in the
@@ -135,20 +135,20 @@ static int cpu_lower_prio(struct bheap_node *_a, struct bheap_node *_b)
 }
 
 /* update_cpu_position - Move the cpu entry to the correct place to maintain
- *                       order in the cpu queue. Caller must hold gsnedf lock.
+ *                       order in the cpu queue. Caller must hold agsnedf lock.
  */
 static void update_cpu_position(cpu_entry_t *entry)
 {
 	if (likely(bheap_node_in_heap(entry->hn)))
-		bheap_delete(cpu_lower_prio, &gsnedf_cpu_heap, entry->hn);
-	bheap_insert(cpu_lower_prio, &gsnedf_cpu_heap, entry->hn);
+		bheap_delete(cpu_lower_prio, &agsnedf_cpu_heap, entry->hn);
+	bheap_insert(cpu_lower_prio, &agsnedf_cpu_heap, entry->hn);
 }
 
-/* caller must hold gsnedf lock */
+/* caller must hold agsnedf lock */
 static cpu_entry_t* lowest_prio_cpu(void)
 {
 	struct bheap_node* hn;
-	hn = bheap_peek(cpu_lower_prio, &gsnedf_cpu_heap);
+	hn = bheap_peek(cpu_lower_prio, &agsnedf_cpu_heap);
 	return hn->value;
 }
 
@@ -176,7 +176,7 @@ static noinline void link_task_to_cpu(struct task_struct* linked,
 		/* handle task is already scheduled somewhere! */
 		on_cpu = linked->rt_param.scheduled_on;
 		if (on_cpu != NO_CPU) {
-			sched = &per_cpu(gsnedf_cpu_entries, on_cpu);
+			sched = &per_cpu(agsnedf_cpu_entries, on_cpu);
 			/* this should only happen if not linked already */
 			BUG_ON(sched->linked == linked);
 
@@ -210,7 +210,7 @@ static noinline void link_task_to_cpu(struct task_struct* linked,
 }
 
 /* unlink - Make sure a task is not linked any longer to an entry
- *          where it was linked before. Must hold gsnedf_lock.
+ *          where it was linked before. Must hold agsnedf_lock.
  */
 static noinline void unlink(struct task_struct* t)
 {
@@ -218,7 +218,7 @@ static noinline void unlink(struct task_struct* t)
 
 	if (t->rt_param.linked_on != NO_CPU) {
 		/* unlink */
-		entry = &per_cpu(gsnedf_cpu_entries, t->rt_param.linked_on);
+		entry = &per_cpu(agsnedf_cpu_entries, t->rt_param.linked_on);
 		t->rt_param.linked_on = NO_CPU;
 		link_task_to_cpu(NULL, entry);
 	} else if (is_queued(t)) {
@@ -229,7 +229,7 @@ static noinline void unlink(struct task_struct* t)
 		 * queue. We must remove it from the list in this
 		 * case.
 		 */
-		remove(&gsnedf, t);
+		remove(&agsnedf, t);
 	}
 }
 
@@ -241,8 +241,8 @@ static void preempt(cpu_entry_t *entry)
 	preempt_if_preemptable(entry->scheduled, entry->cpu);
 }
 
-/* requeue - Put an unlinked task into gsn-edf domain.
- *           Caller must hold gsnedf_lock.
+/* requeue - Put an unlinked task into agsn-edf domain.
+ *           Caller must hold agsnedf_lock.
  */
 static noinline void requeue(struct task_struct* task)
 {
@@ -251,21 +251,21 @@ static noinline void requeue(struct task_struct* task)
 	BUG_ON(is_queued(task));
 
 	if (is_early_releasing(task) || is_released(task, litmus_clock()))
-		__add_ready(&gsnedf, task);
+		__add_ready(&agsnedf, task);
 	else {
 		/* it has got to wait */
-		add_release(&gsnedf, task);
+		add_release(&agsnedf, task);
 	}
 }
 
 #ifdef CONFIG_SCHED_CPU_AFFINITY
-static cpu_entry_t* gsnedf_get_nearest_available_cpu(cpu_entry_t *start)
+static cpu_entry_t* agsnedf_get_nearest_available_cpu(cpu_entry_t *start)
 {
 	cpu_entry_t *affinity;
 
-	get_nearest_available_cpu(affinity, start, gsnedf_cpu_entries,
+	get_nearest_available_cpu(affinity, start, agsnedf_cpu_entries,
 #ifdef CONFIG_RELEASE_MASTER
-			gsnedf.release_master
+			agsnedf.release_master
 #else
 			NO_CPU
 #endif
@@ -282,18 +282,18 @@ static void check_for_preemptions(void)
 	cpu_entry_t *last;
 
 	for (last = lowest_prio_cpu();
-	     edf_preemption_needed(&gsnedf, last->linked);
+	     edf_preemption_needed(&agsnedf, last->linked);
 	     last = lowest_prio_cpu()) {
 		/* preemption necessary */
-		task = __take_ready(&gsnedf);
+		task = __take_ready(&agsnedf);
 		TRACE("check_for_preemptions: attempting to link task %d to %d\n",
 		      task->pid, last->cpu);
 
 #ifdef CONFIG_SCHED_CPU_AFFINITY
 		{
 			cpu_entry_t *affinity =
-					gsnedf_get_nearest_available_cpu(
-						&per_cpu(gsnedf_cpu_entries, task_cpu(task)));
+					agsnedf_get_nearest_available_cpu(
+						&per_cpu(agsnedf_cpu_entries, task_cpu(task)));
 			if (affinity)
 				last = affinity;
 			else if (requeue_preempted_job(last->linked))
@@ -309,8 +309,8 @@ static void check_for_preemptions(void)
 	}
 }
 
-/* gsnedf_job_arrival: task is either resumed or released */
-static noinline void gsnedf_job_arrival(struct task_struct* task)
+/* agsnedf_job_arrival: task is either resumed or released */
+static noinline void agsnedf_job_arrival(struct task_struct* task)
 {
 	BUG_ON(!task);
 
@@ -318,19 +318,19 @@ static noinline void gsnedf_job_arrival(struct task_struct* task)
 	check_for_preemptions();
 }
 
-static void gsnedf_release_jobs(rt_domain_t* rt, struct bheap* tasks)
+static void agsnedf_release_jobs(rt_domain_t* rt, struct bheap* tasks)
 {
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(&gsnedf_lock, flags);
+	raw_spin_lock_irqsave(&agsnedf_lock, flags);
 
 	__merge_ready(rt, tasks);
 	check_for_preemptions();
 
-	raw_spin_unlock_irqrestore(&gsnedf_lock, flags);
+	raw_spin_unlock_irqrestore(&agsnedf_lock, flags);
 }
 
-/* caller holds gsnedf_lock */
+/* caller holds agsnedf_lock */
 static noinline void job_completion(struct task_struct *t, int forced)
 {
 	BUG_ON(!t);
@@ -350,16 +350,16 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	/* requeue
 	 * But don't requeue a blocking task. */
 	if (is_running(t))
-		gsnedf_job_arrival(t);
+		agsnedf_job_arrival(t);
 }
 
-/* gsnedf_tick - this function is called for every local timer
+/* agsnedf_tick - this function is called for every local timer
  *                         interrupt.
  *
  *                   checks whether the current task has expired and checks
  *                   whether we need to preempt it if it has not expired
  */
-static void gsnedf_tick(struct task_struct* t)
+static void agsnedf_tick(struct task_struct* t)
 {
 	if (is_realtime(t) && budget_enforced(t) && budget_exhausted(t)) {
 		if (!is_np(t)) {
@@ -367,11 +367,11 @@ static void gsnedf_tick(struct task_struct* t)
 			 * preemptable again
 			 */
 			litmus_reschedule_local();
-			TRACE("gsnedf_scheduler_tick: "
+			TRACE("agsnedf_scheduler_tick: "
 			      "%d is preemptable "
 			      " => FORCE_RESCHED\n", t->pid);
 		} else if (is_user_np(t)) {
-			TRACE("gsnedf_scheduler_tick: "
+			TRACE("agsnedf_scheduler_tick: "
 			      "%d is non-preemptable, "
 			      "preemption delayed.\n", t->pid);
 			request_exit_np(t);
@@ -400,9 +400,9 @@ static void gsnedf_tick(struct task_struct* t)
  *
  * Any of these can occur together.
  */
-static struct task_struct* gsnedf_schedule(struct task_struct * prev)
+static struct task_struct* agsnedf_schedule(struct task_struct * prev)
 {
-	cpu_entry_t* entry = &__get_cpu_var(gsnedf_cpu_entries);
+	cpu_entry_t* entry = &__get_cpu_var(agsnedf_cpu_entries);
 	int out_of_time, sleep, preempt, np, exists, blocks;
 	struct task_struct* next = NULL;
 
@@ -410,13 +410,13 @@ static struct task_struct* gsnedf_schedule(struct task_struct * prev)
 	/* Bail out early if we are the release master.
 	 * The release master never schedules any real-time tasks.
 	 */
-	if (unlikely(gsnedf.release_master == entry->cpu)) {
+	if (unlikely(agsnedf.release_master == entry->cpu)) {
 		sched_state_task_picked();
 		return NULL;
 	}
 #endif
 
-	raw_spin_lock(&gsnedf_lock);
+	raw_spin_lock(&agsnedf_lock);
 
 	/* sanity checking */
 	BUG_ON(entry->scheduled && entry->scheduled != prev);
@@ -433,7 +433,7 @@ static struct task_struct* gsnedf_schedule(struct task_struct * prev)
 	preempt     = entry->scheduled != entry->linked;
 
 #ifdef WANT_ALL_SCHED_EVENTS
-	TRACE_TASK(prev, "invoked gsnedf_schedule.\n");
+	TRACE_TASK(prev, "invoked agsnedf_schedule.\n");
 #endif
 
 	if (exists)
@@ -473,7 +473,7 @@ static struct task_struct* gsnedf_schedule(struct task_struct * prev)
 	/* Link pending task if we became unlinked.
 	 */
 	if (!entry->linked)
-		link_task_to_cpu(__take_ready(&gsnedf), entry);
+		link_task_to_cpu(__take_ready(&agsnedf), entry);
 
 	/* The final scheduling decision. Do we need to switch for some reason?
 	 * If linked is different from scheduled, then select linked as next.
@@ -500,10 +500,10 @@ static struct task_struct* gsnedf_schedule(struct task_struct * prev)
 
 	sched_state_task_picked();
 
-	raw_spin_unlock(&gsnedf_lock);
+	raw_spin_unlock(&agsnedf_lock);
 
 #ifdef WANT_ALL_SCHED_EVENTS
-	TRACE("gsnedf_lock released, next=0x%p\n", next);
+	TRACE("agsnedf_lock released, next=0x%p\n", next);
 
 	if (next)
 		TRACE_TASK(next, "scheduled at %llu\n", litmus_clock());
@@ -518,9 +518,9 @@ static struct task_struct* gsnedf_schedule(struct task_struct * prev)
 
 /* _finish_switch - we just finished the switch away from prev
  */
-static void gsnedf_finish_switch(struct task_struct *prev)
+static void agsnedf_finish_switch(struct task_struct *prev)
 {
-	cpu_entry_t* 	entry = &__get_cpu_var(gsnedf_cpu_entries);
+	cpu_entry_t* 	entry = &__get_cpu_var(agsnedf_cpu_entries);
 
 	entry->scheduled = is_realtime(current) ? current : NULL;
 #ifdef WANT_ALL_SCHED_EVENTS
@@ -531,24 +531,24 @@ static void gsnedf_finish_switch(struct task_struct *prev)
 
 /*	Prepare a task for running in RT mode
  */
-static void gsnedf_task_new(struct task_struct * t, int on_rq, int running)
+static void agsnedf_task_new(struct task_struct * t, int on_rq, int running)
 {
 	unsigned long 		flags;
 	cpu_entry_t* 		entry;
 
-	TRACE("gsn edf: task new %d\n", t->pid);
+	TRACE("agsn edf: task new %d\n", t->pid);
 
-	raw_spin_lock_irqsave(&gsnedf_lock, flags);
+	raw_spin_lock_irqsave(&agsnedf_lock, flags);
 
 	/* setup job params */
 	release_at(t, litmus_clock());
 
 	if (running) {
-		entry = &per_cpu(gsnedf_cpu_entries, task_cpu(t));
+		entry = &per_cpu(agsnedf_cpu_entries, task_cpu(t));
 		BUG_ON(entry->scheduled);
 
 #ifdef CONFIG_RELEASE_MASTER
-		if (entry->cpu != gsnedf.release_master) {
+		if (entry->cpu != agsnedf.release_master) {
 #endif
 			entry->scheduled = t;
 			tsk_rt(t)->scheduled_on = task_cpu(t);
@@ -564,18 +564,18 @@ static void gsnedf_task_new(struct task_struct * t, int on_rq, int running)
 	}
 	t->rt_param.linked_on          = NO_CPU;
 
-	gsnedf_job_arrival(t);
-	raw_spin_unlock_irqrestore(&gsnedf_lock, flags);
+	agsnedf_job_arrival(t);
+	raw_spin_unlock_irqrestore(&agsnedf_lock, flags);
 }
 
-static void gsnedf_task_wake_up(struct task_struct *task)
+static void agsnedf_task_wake_up(struct task_struct *task)
 {
 	unsigned long flags;
 	lt_t now;
 
 	TRACE_TASK(task, "wake_up at %llu\n", litmus_clock());
 
-	raw_spin_lock_irqsave(&gsnedf_lock, flags);
+	raw_spin_lock_irqsave(&agsnedf_lock, flags);
 	now = litmus_clock();
 	if (is_sporadic(task) && is_tardy(task, now)) {
 		/* new sporadic release */
@@ -589,44 +589,44 @@ static void gsnedf_task_wake_up(struct task_struct *task)
 			tsk_rt(task)->completed = 0;
 		}
 	}
-	gsnedf_job_arrival(task);
-	raw_spin_unlock_irqrestore(&gsnedf_lock, flags);
+	agsnedf_job_arrival(task);
+	raw_spin_unlock_irqrestore(&agsnedf_lock, flags);
 }
 
-static void gsnedf_task_block(struct task_struct *t)
+static void agsnedf_task_block(struct task_struct *t)
 {
 	unsigned long flags;
 
 	TRACE_TASK(t, "block at %llu\n", litmus_clock());
 
 	/* unlink if necessary */
-	raw_spin_lock_irqsave(&gsnedf_lock, flags);
+	raw_spin_lock_irqsave(&agsnedf_lock, flags);
 	unlink(t);
-	raw_spin_unlock_irqrestore(&gsnedf_lock, flags);
+	raw_spin_unlock_irqrestore(&agsnedf_lock, flags);
 
 	BUG_ON(!is_realtime(t));
 }
 
 
-static void gsnedf_task_exit(struct task_struct * t)
+static void agsnedf_task_exit(struct task_struct * t)
 {
 	unsigned long flags;
 
 	/* unlink if necessary */
-	raw_spin_lock_irqsave(&gsnedf_lock, flags);
+	raw_spin_lock_irqsave(&agsnedf_lock, flags);
 	unlink(t);
 	if (tsk_rt(t)->scheduled_on != NO_CPU) {
-		gsnedf_cpus[tsk_rt(t)->scheduled_on]->scheduled = NULL;
+		agsnedf_cpus[tsk_rt(t)->scheduled_on]->scheduled = NULL;
 		tsk_rt(t)->scheduled_on = NO_CPU;
 	}
-	raw_spin_unlock_irqrestore(&gsnedf_lock, flags);
+	raw_spin_unlock_irqrestore(&agsnedf_lock, flags);
 
 	BUG_ON(!is_realtime(t));
         TRACE_TASK(t, "RIP\n");
 }
 
 
-static long gsnedf_admit_task(struct task_struct* tsk)
+static long agsnedf_admit_task(struct task_struct* tsk)
 {
 	return 0;
 }
@@ -641,7 +641,7 @@ static void set_priority_inheritance(struct task_struct* t, struct task_struct* 
 	int linked_on;
 	int check_preempt = 0;
 
-	raw_spin_lock(&gsnedf_lock);
+	raw_spin_lock(&agsnedf_lock);
 
 	TRACE_TASK(t, "inherits priority from %s/%d\n", prio_inh->comm, prio_inh->pid);
 	tsk_rt(t)->inh_task = prio_inh;
@@ -656,13 +656,13 @@ static void set_priority_inheritance(struct task_struct* t, struct task_struct* 
 		 * We can't use heap_decrease() here since
 		 * the cpu_heap is ordered in reverse direction, so
 		 * it is actually an increase. */
-		bheap_delete(cpu_lower_prio, &gsnedf_cpu_heap,
-			    gsnedf_cpus[linked_on]->hn);
-		bheap_insert(cpu_lower_prio, &gsnedf_cpu_heap,
-			    gsnedf_cpus[linked_on]->hn);
+		bheap_delete(cpu_lower_prio, &agsnedf_cpu_heap,
+			    agsnedf_cpus[linked_on]->hn);
+		bheap_insert(cpu_lower_prio, &agsnedf_cpu_heap,
+			    agsnedf_cpus[linked_on]->hn);
 	} else {
 		/* holder may be queued: first stop queue changes */
-		raw_spin_lock(&gsnedf.release_lock);
+		raw_spin_lock(&agsnedf.release_lock);
 		if (is_queued(t)) {
 			TRACE_TASK(t, "%s: is queued\n",
 				   __FUNCTION__);
@@ -681,7 +681,7 @@ static void set_priority_inheritance(struct task_struct* t, struct task_struct* 
 			TRACE_TASK(t, "%s: is NOT queued => Done.\n",
 				   __FUNCTION__);
 		}
-		raw_spin_unlock(&gsnedf.release_lock);
+		raw_spin_unlock(&agsnedf.release_lock);
 
 		/* If holder was enqueued in a release heap, then the following
 		 * preemption check is pointless, but we can't easily detect
@@ -694,18 +694,18 @@ static void set_priority_inheritance(struct task_struct* t, struct task_struct* 
 			 * sure preemption checks get the right task, not the
 			 * potentially stale cache. */
 			bheap_uncache_min(edf_ready_order,
-					 &gsnedf.ready_queue);
+					 &agsnedf.ready_queue);
 			check_for_preemptions();
 		}
 	}
 
-	raw_spin_unlock(&gsnedf_lock);
+	raw_spin_unlock(&agsnedf_lock);
 }
 
 /* called with IRQs off */
 static void clear_priority_inheritance(struct task_struct* t)
 {
-	raw_spin_lock(&gsnedf_lock);
+	raw_spin_lock(&agsnedf_lock);
 
 	/* A job only stops inheriting a priority when it releases a
 	 * resource. Thus we can make the following assumption.*/
@@ -717,9 +717,9 @@ static void clear_priority_inheritance(struct task_struct* t)
 	/* Check if rescheduling is necessary. We can't use heap_decrease()
 	 * since the priority was effectively lowered. */
 	unlink(t);
-	gsnedf_job_arrival(t);
+	agsnedf_job_arrival(t);
 
-	raw_spin_unlock(&gsnedf_lock);
+	raw_spin_unlock(&agsnedf_lock);
 }
 
 
@@ -745,7 +745,7 @@ static inline struct fmlp_semaphore* fmlp_from_lock(struct litmus_lock* lock)
 }
 
 /* caller is responsible for locking */
-struct task_struct* find_hp_waiter(struct fmlp_semaphore *sem,
+struct task_struct* find_hp_waiter_agsn(struct fmlp_semaphore *sem,
 				   struct task_struct* skip)
 {
 	struct list_head	*pos;
@@ -762,7 +762,7 @@ struct task_struct* find_hp_waiter(struct fmlp_semaphore *sem,
 	return found;
 }
 
-int gsnedf_fmlp_lock(struct litmus_lock* l)
+int agsnedf_fmlp_lock(struct litmus_lock* l)
 {
 	struct task_struct* t = current;
 	struct fmlp_semaphore *sem = fmlp_from_lock(l);
@@ -825,7 +825,7 @@ int gsnedf_fmlp_lock(struct litmus_lock* l)
 	return 0;
 }
 
-int gsnedf_fmlp_unlock(struct litmus_lock* l)
+int agsnedf_fmlp_unlock(struct litmus_lock* l)
 {
 	struct task_struct *t = current, *next;
 	struct fmlp_semaphore *sem = fmlp_from_lock(l);
@@ -855,7 +855,7 @@ int gsnedf_fmlp_unlock(struct litmus_lock* l)
 			 * inherit.  However, we need to make sure that the
 			 * next-highest priority in the queue is reflected in
 			 * hp_waiter. */
-			sem->hp_waiter = find_hp_waiter(sem, next);
+			sem->hp_waiter = find_hp_waiter_agsn(sem, next);
 			if (sem->hp_waiter)
 				TRACE_TASK(sem->hp_waiter, "is new highest-prio waiter\n");
 			else
@@ -883,7 +883,7 @@ out:
 	return err;
 }
 
-int gsnedf_fmlp_close(struct litmus_lock* l)
+int agsnedf_fmlp_close(struct litmus_lock* l)
 {
 	struct task_struct *t = current;
 	struct fmlp_semaphore *sem = fmlp_from_lock(l);
@@ -898,24 +898,24 @@ int gsnedf_fmlp_close(struct litmus_lock* l)
 	spin_unlock_irqrestore(&sem->wait.lock, flags);
 
 	if (owner)
-		gsnedf_fmlp_unlock(l);
+		agsnedf_fmlp_unlock(l);
 
 	return 0;
 }
 
-void gsnedf_fmlp_free(struct litmus_lock* lock)
+void agsnedf_fmlp_free(struct litmus_lock* lock)
 {
 	kfree(fmlp_from_lock(lock));
 }
 
-static struct litmus_lock_ops gsnedf_fmlp_lock_ops = {
-	.close  = gsnedf_fmlp_close,
-	.lock   = gsnedf_fmlp_lock,
-	.unlock = gsnedf_fmlp_unlock,
-	.deallocate = gsnedf_fmlp_free,
+static struct litmus_lock_ops agsnedf_fmlp_lock_ops = {
+	.close  = agsnedf_fmlp_close,
+	.lock   = agsnedf_fmlp_lock,
+	.unlock = agsnedf_fmlp_unlock,
+	.deallocate = agsnedf_fmlp_free,
 };
 
-static struct litmus_lock* gsnedf_new_fmlp(void)
+static struct litmus_lock* agsnedf_new_fmlp(void)
 {
 	struct fmlp_semaphore* sem;
 
@@ -926,7 +926,7 @@ static struct litmus_lock* gsnedf_new_fmlp(void)
 	sem->owner   = NULL;
 	sem->hp_waiter = NULL;
 	init_waitqueue_head(&sem->wait);
-	sem->litmus_lock.ops = &gsnedf_fmlp_lock_ops;
+	sem->litmus_lock.ops = &agsnedf_fmlp_lock_ops;
 
 	return &sem->litmus_lock;
 }
@@ -934,7 +934,7 @@ static struct litmus_lock* gsnedf_new_fmlp(void)
 /* **** lock constructor **** */
 
 
-static long gsnedf_allocate_lock(struct litmus_lock **lock, int type,
+static long agsnedf_allocate_lock(struct litmus_lock **lock, int type,
 				 void* __user unused)
 {
 	int err = -ENXIO;
@@ -944,7 +944,7 @@ static long gsnedf_allocate_lock(struct litmus_lock **lock, int type,
 
 	case FMLP_SEM:
 		/* Flexible Multiprocessor Locking Protocol */
-		*lock = gsnedf_new_fmlp();
+		*lock = agsnedf_new_fmlp();
 		if (*lock)
 			err = 0;
 		else
@@ -959,23 +959,23 @@ static long gsnedf_allocate_lock(struct litmus_lock **lock, int type,
 #endif
 
 
-static long gsnedf_activate_plugin(void)
+static long agsnedf_activate_plugin(void)
 {
 	int cpu;
 	cpu_entry_t *entry;
 
-	bheap_init(&gsnedf_cpu_heap);
+	bheap_init(&agsnedf_cpu_heap);
 #ifdef CONFIG_RELEASE_MASTER
-	gsnedf.release_master = atomic_read(&release_master_cpu);
+	agsnedf.release_master = atomic_read(&release_master_cpu);
 #endif
 
 	for_each_online_cpu(cpu) {
-		entry = &per_cpu(gsnedf_cpu_entries, cpu);
+		entry = &per_cpu(agsnedf_cpu_entries, cpu);
 		bheap_node_init(&entry->hn, entry);
 		entry->linked    = NULL;
 		entry->scheduled = NULL;
 #ifdef CONFIG_RELEASE_MASTER
-		if (cpu != gsnedf.release_master) {
+		if (cpu != agsnedf.release_master) {
 #endif
 			TRACE("GSN-EDF: Initializing CPU #%d.\n", cpu);
 			update_cpu_position(entry);
@@ -989,41 +989,41 @@ static long gsnedf_activate_plugin(void)
 }
 
 /*	Plugin object	*/
-static struct sched_plugin gsn_edf_plugin __cacheline_aligned_in_smp = {
-	.plugin_name		= "GSN-EDF",
-	.finish_switch		= gsnedf_finish_switch,
-	.tick			= gsnedf_tick,
-	.task_new		= gsnedf_task_new,
+static struct sched_plugin agsn_edf_plugin __cacheline_aligned_in_smp = {
+	.plugin_name		= "AGSN-EDF",
+	.finish_switch		= agsnedf_finish_switch,
+	.tick			= agsnedf_tick,
+	.task_new		= agsnedf_task_new,
 	.complete_job		= complete_job,
-	.task_exit		= gsnedf_task_exit,
-	.schedule		= gsnedf_schedule,
-	.task_wake_up		= gsnedf_task_wake_up,
-	.task_block		= gsnedf_task_block,
-	.admit_task		= gsnedf_admit_task,
-	.activate_plugin	= gsnedf_activate_plugin,
+	.task_exit		= agsnedf_task_exit,
+	.schedule		= agsnedf_schedule,
+	.task_wake_up		= agsnedf_task_wake_up,
+	.task_block		= agsnedf_task_block,
+	.admit_task		= agsnedf_admit_task,
+	.activate_plugin	= agsnedf_activate_plugin,
 #ifdef CONFIG_LITMUS_LOCKING
-	.allocate_lock		= gsnedf_allocate_lock,
+	.allocate_lock		= agsnedf_allocate_lock,
 #endif
 };
 
 
-static int __init init_gsn_edf(void)
+static int __init init_agsn_edf(void)
 {
 	int cpu;
 	cpu_entry_t *entry;
 
-	bheap_init(&gsnedf_cpu_heap);
+	bheap_init(&agsnedf_cpu_heap);
 	/* initialize CPU state */
 	for (cpu = 0; cpu < NR_CPUS; cpu++)  {
-		entry = &per_cpu(gsnedf_cpu_entries, cpu);
-		gsnedf_cpus[cpu] = entry;
+		entry = &per_cpu(agsnedf_cpu_entries, cpu);
+		agsnedf_cpus[cpu] = entry;
 		entry->cpu 	 = cpu;
-		entry->hn        = &gsnedf_heap_node[cpu];
+		entry->hn        = &agsnedf_heap_node[cpu];
 		bheap_node_init(&entry->hn, entry);
 	}
-	edf_domain_init(&gsnedf, NULL, gsnedf_release_jobs);
-	return register_sched_plugin(&gsn_edf_plugin);
+	edf_domain_init(&agsnedf, NULL, agsnedf_release_jobs);
+	return register_sched_plugin(&agsn_edf_plugin);
 }
 
 
-module_init(init_gsn_edf);
+module_init(init_agsn_edf);
