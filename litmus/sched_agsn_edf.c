@@ -349,7 +349,7 @@ static void calculate_estimated_execution_cost(struct task_struct *t, double p, 
 	t->rt_param.current_diff_est_actual_exec_cost = 
 		get_estimated_exec_time(t) - get_exec_time(t);
 
-	t->rt_param.estimated_exec_time = 
+	t->rt_param.job_params.estimated_exec_time = 
 		(lt_t)	(p * t->rt_param.current_diff_est_actual_exec_cost + 
 				 i * t->rt_param.cumulative_diff_est_actual_exec_cost);		
 	return;
@@ -372,7 +372,8 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	/* set flags */
 	tsk_rt(t)->completed = 0;
 	/* prepare for next period */
-	calculate_estimated_execution_cost(t);
+	//TODO: replace the (1,1) in next line with user-set p and i values
+	calculate_estimated_execution_cost(t,1,1);
 	prepare_for_next_period(t);
 	
 

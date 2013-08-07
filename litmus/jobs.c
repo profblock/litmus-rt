@@ -48,6 +48,21 @@ void prepare_for_next_period(struct task_struct *t)
 void release_at(struct task_struct *t, lt_t start)
 {
 	BUG_ON(!t);
-	k();
-	return;
+	setup_release(t, start);
+	tsk_rt(t)->completed = 0;
+}
+
+
+/*
+ *	Deactivate current task until the beginning of the next period.
+ */
+long complete_job(void)
+{
+	/* Mark that we do not excute anymore */
+	tsk_rt(current)->completed = 1;
+	/* call schedule, this will return when a new job arrives
+	 * it also takes care of preparing for the next release
+	 */
+	schedule();
+	return 0;
 }
