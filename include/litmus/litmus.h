@@ -63,12 +63,14 @@ void litmus_exit_task(struct task_struct *tsk);
 #define get_priority(t) 	(tsk_rt(t)->task_params.priority)
 #define get_class(t)        (tsk_rt(t)->task_params.cls)
 #define get_release_policy(t) (tsk_rt(t)->task_params.release_policy)
+#define get_service_levels(t) (tsk_rt(t)->task_params.service_levels)
 
 /* job_param macros */
 #define get_exec_time(t)    (tsk_rt(t)->job_params.exec_time)
 #define get_deadline(t)		(tsk_rt(t)->job_params.deadline)
 #define get_release(t)		(tsk_rt(t)->job_params.release)
 #define get_lateness(t)		(tsk_rt(t)->job_params.lateness)
+#define get_current_survice_level(t)		(tsk_rt(t)->job_params.current_service_level)
 
 /* release policy macros */
 #define is_periodic(t)		(get_release_policy(t) == TASK_PERIODIC)

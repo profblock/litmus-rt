@@ -79,12 +79,17 @@ typedef enum {
  * it would have take 2.1*20 = 42ms to complete. 
  * Quality of service is an absolute measurement. The higher the number, the better.
  * 
- * NOTE (1): relative_work for service level 0 is always assumed to be 1.
- * NOTE (2): Each service must take more work and have a higher quality of service */
+ * NOTE (1): 	relative_work for service level 0 is always assumed to be 1.
+ * NOTE (2): 	Each service must take more work and have a higher quality of service 
+ * NOTE (3): 	If the only difference between service levels is the length of the period
+ *				then the "relative_work" can be exact; however, the period may stay the 
+ *				same and the amount of computation might be the one to change
+ */
 struct rt_service_level{
- 	double relative_work;
-	double quality_of_service;
-	unsigned int service_level_number;
+ 	double 		relative_work;
+	double 		quality_of_service;
+	lt_t 		service_level_period;
+	unsigned int 		service_level_number;
 };
 
 
@@ -186,6 +191,12 @@ struct rt_job {
 	 * Increase this sequence number when a job is released.
 	 */
 	unsigned int    job_no;
+	
+	/* The current service level of the job. Only used by adaptive
+	 * scheduling algorithms
+	 */
+	unsigned int 	current_service_level;
+	
 };
 
 struct pfair_param;

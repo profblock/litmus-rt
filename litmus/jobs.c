@@ -10,8 +10,19 @@ static inline void setup_release(struct task_struct *t, lt_t release)
 {
 	/* prepare next release */
 	t->rt_param.job_params.release = release;
-	t->rt_param.job_params.deadline = release + get_rt_relative_deadline(t);
+	/* If the task has multiple service levels (i.e., adaptive), then the deadline is 
+	 * determined  by the current service level. 
+	 */
+	if (get_service_levels(t))  {
+		struct rt_service_level current_service_level = 
+			get_service_levels(t)[get_current_survice_level(t)];
+		lt_t relative_deadline = current_service_level.service_level_period;
+		t->rt_param.job_params.deadline = release + relative_deadline;
+	} else {
+		t->rt_param.job_params.deadline = release + get_rt_relative_deadline(t);
+	}
 	t->rt_param.job_params.exec_time = 0;
+	
 
 	/* update job sequence number */
 	t->rt_param.job_params.job_no++;

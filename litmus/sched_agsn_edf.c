@@ -1,3 +1,8 @@
+//TODO: Upon new task arrival. Set up service levels
+//TODO: Upon job completition, calculate estimated execution time
+//TODO: Upon Job completition: Determine if service levels should change
+//TODO: Remove any bugs that might occur by ovverunns
+//TODO: Clean up code to get rid of locking from "coppying" GSN-EDF
 /*
  * litmus/sched_agsn_edf.c
  *
@@ -330,6 +335,17 @@ static void agsnedf_release_jobs(rt_domain_t* rt, struct bheap* tasks)
 	raw_spin_unlock_irqrestore(&agsnedf_lock, flags);
 }
 
+static void calculate_estimated_execution_cost(struct task_struct *t){
+	//TODO: Calculate estimated weight. 
+	//TODO: Use the lateness factor that is calculated to performe the feedback .
+	return;
+}
+
+static void adjust_all_service_levels(){
+	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
+}
+
+
 /* caller holds agsnedf_lock */
 static noinline void job_completion(struct task_struct *t, int forced)
 {
@@ -343,6 +359,13 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	tsk_rt(t)->completed = 0;
 	/* prepare for next period */
 	prepare_for_next_period(t);
+	
+	calculate_estimated_execution_cost(t);
+
+	//TODO: Make a flag for the scheduler base on whether service levels are adjusted
+	//based on time or trigger level. 
+	adjust_all_service_levels();
+	
 	if (is_early_releasing(t) || is_released(t, litmus_clock()))
 		sched_trace_task_release(t);
 	/* unlink */
@@ -977,11 +1000,11 @@ static long agsnedf_activate_plugin(void)
 #ifdef CONFIG_RELEASE_MASTER
 		if (cpu != agsnedf.release_master) {
 #endif
-			TRACE("GSN-EDF: Initializing CPU #%d.\n", cpu);
+			TRACE("AGSN-EDF: Initializing CPU #%d.\n", cpu);
 			update_cpu_position(entry);
 #ifdef CONFIG_RELEASE_MASTER
 		} else {
-			TRACE("GSN-EDF: CPU %d is release master.\n", cpu);
+			TRACE("AGSN-EDF: CPU %d is release master.\n", cpu);
 		}
 #endif
 	}
