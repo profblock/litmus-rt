@@ -1,9 +1,9 @@
-//TODO: Verify that execution_time is actually calculating what it seems like it should be
 //TODO: Upon new task arrival. Set up service levels
 //TODO: Upon job completition, calculate estimated execution time
 //TODO: Upon Job completition: Determine if service levels should change
 //TODO: Remove any bugs that might occur by ovverunns
 //TODO: Clean up code to get rid of locking from "coppying" GSN-EDF
+//TODO-NOTE: Verify emperically that execution_time is actually calculating what it seems like it should be
 /*
  * litmus/sched_agsn_edf.c
  *
@@ -372,8 +372,12 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	/* set flags */
 	tsk_rt(t)->completed = 0;
 	/* prepare for next period */
-	//TODO: replace the (1,1) in next line with user-set p and i values
-	calculate_estimated_execution_cost(t,1,1);
+	//TODO: replace the (0.10206228,1) in next line with user-set p and i values
+	/* The values 0.102 and 0.30345 are the a and b values that are calculated from
+	 * Aaron Block's dissertation referenced on pages 293 (the experimental values for
+	 * a and c) and the relationship of a,b,c is given on page 253 just below (6.2)
+	 */
+	calculate_estimated_execution_cost(t,0.102,0.30345);
 	prepare_for_next_period(t);
 	
 
