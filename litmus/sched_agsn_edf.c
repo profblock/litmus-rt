@@ -1,5 +1,4 @@
 //TODO: Upon new task arrival. Set up service levels
-//TODO: Upon job completition, calculate estimated execution time
 //TODO: Upon Job completition: Determine if service levels should change
 //TODO: Remove any bugs that might occur by ovverunns
 //TODO: Clean up code to get rid of locking from "coppying" GSN-EDF
@@ -103,6 +102,8 @@
  * __take_ready).
  */
 
+//TODO: REMOVE THIS
+int aaron_fake_counter = 1;
 
 /* cpu_entry_t - maintain the linked and scheduled state
  */
@@ -372,6 +373,7 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	/* set flags */
 	tsk_rt(t)->completed = 0;
 	/* prepare for next period */
+	
 	//TODO: replace the (0.10206228,1) in next line with user-set p and i values
 	/* The values 0.102 and 0.30345 are the a and b values that are calculated from
 	 * Aaron Block's dissertation referenced on pages 293 (the experimental values for
@@ -607,6 +609,11 @@ static void agsnedf_task_new(struct task_struct * t, int on_rq, int running)
 	}
 	t->rt_param.linked_on          = NO_CPU;
 
+	/*** Testing *** TODO: REMOVE THIS ***/
+	aaron_fake_counter++;
+	tsk_rt(t)->ctrl_page->service_level= aaron_fake_counter;
+	/***** END REMOVE **/
+	 
 	agsnedf_job_arrival(t);
 	raw_spin_unlock_irqrestore(&agsnedf_lock, flags);
 }
