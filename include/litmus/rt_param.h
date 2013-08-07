@@ -177,12 +177,17 @@ struct rt_job {
 	/* How much service has this job received so far? */
 	lt_t	exec_time;
 
+
+	/* When a job is released, how much time do we think it should take */
+	lt_t	estimated_exec_time;
+	
 	/* By how much did the prior job miss its deadline by?
 	 * Value differs from tardiness in that lateness may
 	 * be negative (when job finishes before its deadline).
 	 */
 	long long	lateness;
 
+	
 	/* Which job is this. This is used to let user space
 	 * specify which job to wait for, which is important if jobs
 	 * overrun. If we just call sys_sleep_next_period() then we
@@ -244,6 +249,18 @@ struct rt_param {
 	 */
 	 struct task_struct*	inh_task;
 
+	/* The difference between the estimated and the actual estimated
+	 * execution cost. We keep two values because feedback controllers
+	 * value these two terms differently. 
+	 * these values can be used to set up a PI controller (Proportional-Integrative)
+	 * If you want to set up a PID controller, you will need to add additional values. 
+	 * NOTE: 	cumulative_diff_est_actual_exec_cost should not include the value from
+	 *			current_diff_est_actual_exec_cost.
+	 */
+	 
+	lt_t 			current_diff_est_actual_exec_cost;
+	lt_t 			cumulative_diff_est_actual_exec_cost;
+	
 #ifdef CONFIG_NP_SECTION
 	/* For the FMLP under PSN-EDF, it is required to make the task
 	 * non-preemptive from kernel space. In order not to interfere with

@@ -1,3 +1,4 @@
+//TODO: Verify that execution_time is actually calculating what it seems like it should be
 //TODO: Upon new task arrival. Set up service levels
 //TODO: Upon job completition, calculate estimated execution time
 //TODO: Upon Job completition: Determine if service levels should change
@@ -335,9 +336,22 @@ static void agsnedf_release_jobs(rt_domain_t* rt, struct bheap* tasks)
 	raw_spin_unlock_irqrestore(&agsnedf_lock, flags);
 }
 
-static void calculate_estimated_execution_cost(struct task_struct *t){
-	//TODO: Calculate estimated weight. 
-	//TODO: Use the lateness factor that is calculated to performe the feedback .
+/* 	p and i values are the weights that should be given to the proportional and
+ *	integrative components for calculating a new estimated execution time 
+ * 	NOTE: Must be called before execution_cost is reset*/
+static void calculate_estimated_execution_cost(struct task_struct *t, double p, double i){
+
+	/* update the cumulative estimated execution difference */
+	t->rt_param.cumulative_diff_est_actual_exec_cost+=
+		t->rt_param.current_diff_est_actual_exec_cost;
+		
+	/* Update the difference between the estimated and actual execution time*/
+	t->rt_param.current_diff_est_actual_exec_cost = 
+		get_estimated_exec_time(t) - get_exec_time(t);
+
+	t->rt_param.estimated_exec_time = 
+		(lt_t)	(p * t->rt_param.current_diff_est_actual_exec_cost + 
+				 i * t->rt_param.cumulative_diff_est_actual_exec_cost);		
 	return;
 }
 
@@ -358,9 +372,10 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	/* set flags */
 	tsk_rt(t)->completed = 0;
 	/* prepare for next period */
+	calculate_estimated_execution_cost(t);
 	prepare_for_next_period(t);
 	
-	calculate_estimated_execution_cost(t);
+
 
 	//TODO: Make a flag for the scheduler base on whether service levels are adjusted
 	//based on time or trigger level. 
