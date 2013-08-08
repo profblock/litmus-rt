@@ -360,9 +360,9 @@ static noinline void adjust_all_service_levels(void){
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
 	// This is how tsk_rt(t)->ctrl_page->service_level;
 	if(agsnedf_total_utilization> NR_CPUS){
-		TRACE("OVER utilization is %d\n", agsnedf_total_utilization*1000);
+		TRACE("OVER utilization is %d\n", (int)(agsnedf_total_utilization*10000));
 	} else {
-		TRACE("Under utilization is %d\n", agsnedf_total_utilization*1000);
+		TRACE("Under utilization is %d\n", (int)(agsnedf_total_utilization*10000));
 	}
 	
 	
@@ -383,24 +383,27 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	/* set flags */
 	tsk_rt(t)->completed = 0;
 	/* prepare for next period */
-	
-	
+		
+
 	old_est_weight = get_estimated_weight(t);
-	TRACE("Actual execution time %llu\n ",get_exec_time(t));
-	TRACE("Execution time changed from %lld\n",get_estimated_exec_time(t));
+
 	//TODO: replace the (0.10206228,1) in next line with user-set p and i values
 	/* The values 0.102 and 0.30345 are the a and b values that are calculated from
 	 * Aaron Block's dissertation referenced on pages 293 (the experimental values for
 	 * a and c) and the relationship of a,b,c is given on page 253 just below (6.2)
 	 */
 	calculate_estimated_execution_cost(t,0.102,0.30345);
+	
+	t->rt_param.job_params.estimated_weight = 
+		((double) get_estimated_exec_time(t))/get_rt_relative_deadline(t);
+	
 	//TODO: Make a flag for the scheduler base on whether service levels are adjusted
 	//based on time or trigger level. 
 	
 	/* The change in the estimated_weight of this job must be added to the total 
 	 * utilization
 	 */
-	TRACE("to %lld\n",get_estimated_exec_time(t));
+
 	difference_in_weight = get_estimated_weight(t) - old_est_weight;
 	agsnedf_total_utilization += difference_in_weight;
 	adjust_all_service_levels();
@@ -1034,7 +1037,8 @@ static long agsnedf_activate_plugin(void)
 {
 	int cpu;
 	cpu_entry_t *entry;
-
+	agsnedf_total_utilization = 0;
+	
 	bheap_init(&agsnedf_cpu_heap);
 #ifdef CONFIG_RELEASE_MASTER
 	agsnedf.release_master = atomic_read(&release_master_cpu);
@@ -1082,7 +1086,6 @@ static int __init init_agsn_edf(void)
 {
 	int cpu;
 	cpu_entry_t *entry;
-	agsnedf_total_utilization = 0;
 	bheap_init(&agsnedf_cpu_heap);
 	/* initialize CPU state */
 	for (cpu = 0; cpu < NR_CPUS; cpu++)  {
