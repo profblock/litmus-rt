@@ -1,4 +1,5 @@
 //TODO: Upon new task arrival. Set up service levels
+//TODO: Verify that total estimated weight is calculated correctly
 //TODO: Upon Job completition: Determine if service levels should change
 //TODO: Remove any bugs that might occur by ovverunns
 //TODO: Clean up code to get rid of locking from "coppying" GSN-EDF
@@ -118,6 +119,8 @@ cpu_entry_t* agsnedf_cpus[NR_CPUS];
 /* the cpus queue themselves according to priority in here */
 static struct bheap_node agsnedf_heap_node[NR_CPUS];
 static struct bheap      agsnedf_cpu_heap;
+
+static double agsnedf_total_utilization;
 
 static rt_domain_t agsnedf;
 #define agsnedf_lock (agsnedf.ready_lock)
@@ -339,14 +342,13 @@ static void agsnedf_release_jobs(rt_domain_t* rt, struct bheap* tasks)
  *	integrative components for calculating a new estimated execution time 
  * 	NOTE: Must be called before execution_cost is reset*/
 static void calculate_estimated_execution_cost(struct task_struct *t, double p, double i){
-
 	/* update the cumulative estimated execution difference */
 	t->rt_param.cumulative_diff_est_actual_exec_cost+=
 		t->rt_param.current_diff_est_actual_exec_cost;
 		
 	/* Update the difference between the estimated and actual execution time*/
 	t->rt_param.current_diff_est_actual_exec_cost = 
-		get_estimated_exec_time(t) - get_exec_time(t);
+		 get_exec_time(t) - get_estimated_exec_time(t);
 
 	t->rt_param.job_params.estimated_exec_time = 
 		(lt_t)	(p * t->rt_param.current_diff_est_actual_exec_cost + 
@@ -354,15 +356,24 @@ static void calculate_estimated_execution_cost(struct task_struct *t, double p, 
 	return;
 }
 
-static noinline void adjust_all_service_levels(){
+static noinline void adjust_all_service_levels(void){
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
 	// This is how tsk_rt(t)->ctrl_page->service_level;
+	if(agsnedf_total_utilization> NR_CPUS){
+		TRACE("OVER utilization is %d\n", agsnedf_total_utilization*1000);
+	} else {
+		TRACE("Under utilization is %d\n", agsnedf_total_utilization*1000);
+	}
+	
+	
 }
 
 
 /* caller holds agsnedf_lock */
 static noinline void job_completion(struct task_struct *t, int forced)
 {
+	double old_est_weight;
+	double difference_in_weight;
 	BUG_ON(!t);
 
 	sched_trace_task_completion(t, forced);
@@ -373,19 +384,31 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	tsk_rt(t)->completed = 0;
 	/* prepare for next period */
 	
+	
+	old_est_weight = get_estimated_weight(t);
+	TRACE("Actual execution time %llu\n ",get_exec_time(t));
+	TRACE("Execution time changed from %lld\n",get_estimated_exec_time(t));
 	//TODO: replace the (0.10206228,1) in next line with user-set p and i values
 	/* The values 0.102 and 0.30345 are the a and b values that are calculated from
 	 * Aaron Block's dissertation referenced on pages 293 (the experimental values for
 	 * a and c) and the relationship of a,b,c is given on page 253 just below (6.2)
 	 */
 	calculate_estimated_execution_cost(t,0.102,0.30345);
+	//TODO: Make a flag for the scheduler base on whether service levels are adjusted
+	//based on time or trigger level. 
+	
+	/* The change in the estimated_weight of this job must be added to the total 
+	 * utilization
+	 */
+	TRACE("to %lld\n",get_estimated_exec_time(t));
+	difference_in_weight = get_estimated_weight(t) - old_est_weight;
+	agsnedf_total_utilization += difference_in_weight;
+	adjust_all_service_levels();
 	prepare_for_next_period(t);
 	
 
 
-	//TODO: Make a flag for the scheduler base on whether service levels are adjusted
-	//based on time or trigger level. 
-	adjust_all_service_levels();
+
 	
 	if (is_early_releasing(t) || is_released(t, litmus_clock()))
 		sched_trace_task_release(t);
@@ -584,6 +607,10 @@ static void agsnedf_task_new(struct task_struct * t, int on_rq, int running)
 
 	raw_spin_lock_irqsave(&agsnedf_lock, flags);
 
+	/* TODO: allow for better setting of estimated execution
+	 * time.
+	 */
+	t->rt_param.job_params.estimated_exec_time = 0;
 	/* setup job params */
 	release_at(t, litmus_clock());
 
@@ -1055,7 +1082,7 @@ static int __init init_agsn_edf(void)
 {
 	int cpu;
 	cpu_entry_t *entry;
-
+	agsnedf_total_utilization = 0;
 	bheap_init(&agsnedf_cpu_heap);
 	/* initialize CPU state */
 	for (cpu = 0; cpu < NR_CPUS; cpu++)  {

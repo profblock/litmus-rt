@@ -181,6 +181,9 @@ struct rt_job {
 	/* When a job is released, how much time do we think it should take */
 	lt_t	estimated_exec_time;
 	
+	/*The estimated weight of the next job */
+	double	estimated_weight;
+	
 	/* By how much did the prior job miss its deadline by?
 	 * Value differs from tardiness in that lateness may
 	 * be negative (when job finishes before its deadline).
@@ -258,8 +261,8 @@ struct rt_param {
 	 *			current_diff_est_actual_exec_cost.
 	 */
 	 
-	lt_t 			current_diff_est_actual_exec_cost;
-	lt_t 			cumulative_diff_est_actual_exec_cost;
+	long long 		current_diff_est_actual_exec_cost;
+	long long 		cumulative_diff_est_actual_exec_cost;
 	
 #ifdef CONFIG_NP_SECTION
 	/* For the FMLP under PSN-EDF, it is required to make the task

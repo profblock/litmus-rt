@@ -17,7 +17,21 @@ static inline void setup_release(struct task_struct *t, lt_t release)
 		struct rt_service_level current_service_level = 
 			get_service_levels(t)[get_current_survice_level(t)];
 		lt_t relative_deadline = current_service_level.service_level_period;
+		
 		t->rt_param.job_params.deadline = release + relative_deadline;
+		
+		t->rt_param.job_params.estimated_weight = 
+			((double) get_estimated_exec_time(t))/relative_deadline;
+		
+		/* There are two "current service levels" on in job_params on in the 
+		 * task's control_page. The control_page struct is the one the user-space
+		 * task is aware of. The job_params is used to denote the service level
+		 * the next job should be released at. We update the control_page one here
+		 */
+		 
+		 tsk_rt(t)->ctrl_page->service_level = get_current_survice_level(t);
+		 
+		
 	} else {
 		t->rt_param.job_params.deadline = release + get_rt_relative_deadline(t);
 	}

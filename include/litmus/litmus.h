@@ -70,6 +70,7 @@ void litmus_exit_task(struct task_struct *tsk);
 #define get_deadline(t)		(tsk_rt(t)->job_params.deadline)
 #define get_release(t)		(tsk_rt(t)->job_params.release)
 #define get_estimated_exec_time(t)		(tsk_rt(t)->job_params.estimated_exec_time)
+#define get_estimated_weight(t)		(tsk_rt(t)->job_params.estimated_weight)
 #define get_lateness(t)		(tsk_rt(t)->job_params.lateness)
 #define get_current_survice_level(t)		(tsk_rt(t)->job_params.current_service_level)
 
