@@ -102,8 +102,6 @@
  * __take_ready).
  */
 
-//TODO: REMOVE THIS
-int aaron_fake_counter = 1;
 
 /* cpu_entry_t - maintain the linked and scheduled state
  */
@@ -356,8 +354,9 @@ static void calculate_estimated_execution_cost(struct task_struct *t, double p, 
 	return;
 }
 
-static void adjust_all_service_levels(){
+static noinline void adjust_all_service_levels(){
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
+	// This is how tsk_rt(t)->ctrl_page->service_level;
 }
 
 
@@ -608,11 +607,6 @@ static void agsnedf_task_new(struct task_struct * t, int on_rq, int running)
 		t->rt_param.scheduled_on = NO_CPU;
 	}
 	t->rt_param.linked_on          = NO_CPU;
-
-	/*** Testing *** TODO: REMOVE THIS ***/
-	aaron_fake_counter++;
-	tsk_rt(t)->ctrl_page->service_level= aaron_fake_counter;
-	/***** END REMOVE **/
 	 
 	agsnedf_job_arrival(t);
 	raw_spin_unlock_irqrestore(&agsnedf_lock, flags);
