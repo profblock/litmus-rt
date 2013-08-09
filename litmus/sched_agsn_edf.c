@@ -688,11 +688,24 @@ static void agsnedf_task_exit(struct task_struct * t)
 
 	/* unlink if necessary */
 	raw_spin_lock_irqsave(&agsnedf_lock, flags);
+	
+	/* When a task exits, we need to remove it's weight from the total utilization
+	 * There is a possibility that the estimated weight may drift from the total util
+	 * in this case, just set the total utilization to 0. */
+	if (agsnedf_total_utilization<get_estimated_weight(t)){
+		agsnedf_total_utilization=0;
+	} else {
+		agsnedf_total_utilization-=get_estimated_weight(t);
+	}
+	
 	unlink(t);
 	if (tsk_rt(t)->scheduled_on != NO_CPU) {
 		agsnedf_cpus[tsk_rt(t)->scheduled_on]->scheduled = NULL;
 		tsk_rt(t)->scheduled_on = NO_CPU;
 	}
+	
+	
+	
 	raw_spin_unlock_irqrestore(&agsnedf_lock, flags);
 
 	BUG_ON(!is_realtime(t));
