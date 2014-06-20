@@ -1,3 +1,9 @@
+//TODO: Upon new task arrival. Set up service levels
+//TODO: Verify that total estimated weight is calculated correctly
+//TODO: Upon Job completition: Determine if service levels should change
+//TODO: Remove any bugs that might occur by ovverunns
+//TODO: Clean up code to get rid of locking from "coppying" GSN-EDF
+//TODO-NOTE: Verify emperically that execution_time is actually calculating what it seems like it should
 /*
  * litmus/sched_adgsn_edf.c
  *
@@ -116,6 +122,10 @@ cpu_entry_t* adgsnedf_cpus[NR_CPUS];
 /* the cpus queue themselves according to priority in here */
 static struct bheap_node adgsnedf_heap_node[NR_CPUS];
 static struct bheap      adgsnedf_cpu_heap;
+
+
+static double agsnedf_total_utilization;
+
 
 static rt_domain_t adgsnedf;
 #define adgsnedf_lock (adgsnedf.ready_lock)
@@ -354,9 +364,44 @@ static void adgsnedf_release_jobs(rt_domain_t* rt, struct bheap* tasks)
 	raw_spin_unlock_irqrestore(&adgsnedf_lock, flags);
 }
 
+/* 	p and i values are the weights that should be given to the proportional and
+ *	integrative components for calculating a new estimated execution time 
+ * 	NOTE: Must be called before execution_cost is reset*/
+static void calculate_estimated_execution_cost(struct task_struct *t, double p, double i){
+	/* update the cumulative estimated execution difference */
+	t->rt_param.cumulative_diff_est_actual_exec_cost+=
+		t->rt_param.current_diff_est_actual_exec_cost;
+		
+	/* Update the difference between the estimated and actual execution time*/
+	t->rt_param.current_diff_est_actual_exec_cost = 
+		 get_exec_time(t) - get_estimated_exec_time(t);
+ 
+	t->rt_param.job_params.estimated_exec_time = 
+		(lt_t)	(p * t->rt_param.current_diff_est_actual_exec_cost + 
+				 i * t->rt_param.cumulative_diff_est_actual_exec_cost);		
+	return;
+}
+ 
+static noinline void adjust_all_service_levels(void){
+	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
+	// This is how tsk_rt(t)->ctrl_page->service_level;
+	if(agsnedf_total_utilization> NR_CPUS){
+		TRACE("OVER utilization is %d\n", (int)(agsnedf_total_utilization*10000));
+	} else {
+		TRACE("Under utilization is %d\n", (int)(agsnedf_total_utilization*10000));
+	}
+	
+	
+}
+ 
+ 
+ 
+
 /* caller holds adgsnedf_lock */
 static noinline void job_completion(struct task_struct *t, int forced)
 {
+	double old_est_weight;
+	double difference_in_weight;
 	BUG_ON(!t);
 
 	sched_trace_task_completion(t, forced);
@@ -365,6 +410,30 @@ static noinline void job_completion(struct task_struct *t, int forced)
 
 	/* set flags */
 	tsk_rt(t)->completed = 0;
+	
+		old_est_weight = get_estimated_weight(t);
+ 
+	//TODO: replace the (0.10206228,1) in next line with user-set p and i values
+	/* The values 0.102 and 0.30345 are the a and b values that are calculated from
+	 * Aaron Block's dissertation referenced on pages 293 (the experimental values for
+	 * a and c) and the relationship of a,b,c is given on page 253 just below (6.2)
+	 */
+	calculate_estimated_execution_cost(t,0.102,0.30345);
+	
+	t->rt_param.job_params.estimated_weight = 
+		((double) get_estimated_exec_time(t))/get_rt_relative_deadline(t);
+	
+	//TODO: Make a flag for the scheduler base on whether service levels are adjusted
+	//based on time or trigger level. 
+	
+	/* The change in the estimated_weight of this job must be added to the total 
+	 * utilization
+	 */
+ 
+	difference_in_weight = get_estimated_weight(t) - old_est_weight;
+	agsnedf_total_utilization += difference_in_weight;
+	adjust_all_service_levels();
+	
 	/* prepare for next period */
 	prepare_for_next_period(t);
 	if (is_early_releasing(t) || is_released(t, litmus_clock()))
@@ -538,6 +607,11 @@ static void adgsnedf_task_new(struct task_struct * t, int on_rq, int is_schedule
 
 	raw_spin_lock_irqsave(&adgsnedf_lock, flags);
 
+	/* TODO: allow for better setting of estimated execution
+	 * time.
+	 */
+	t->rt_param.job_params.estimated_exec_time = 0;
+	
 	/* setup job params */
 	release_at(t, litmus_clock());
 
@@ -606,6 +680,16 @@ static void adgsnedf_task_exit(struct task_struct * t)
 
 	/* unlink if necessary */
 	raw_spin_lock_irqsave(&adgsnedf_lock, flags);
+	
+	/* When a task exits, we need to remove it's weight from the total utilization
+	 * There is a possibility that the estimated weight may drift from the total util
+	 * in this case, just set the total utilization to 0. */
+	if (agsnedf_total_utilization<get_estimated_weight(t)){
+		agsnedf_total_utilization=0;
+	} else {
+		agsnedf_total_utilization-=get_estimated_weight(t);
+	}
+	
 	unlink(t);
 	if (tsk_rt(t)->scheduled_on != NO_CPU) {
 		adgsnedf_cpus[tsk_rt(t)->scheduled_on]->scheduled = NULL;
@@ -993,6 +1077,8 @@ static long adgsnedf_activate_plugin(void)
 {
 	int cpu;
 	cpu_entry_t *entry;
+	
+	agsnedf_total_utilization = 0;
 
 	bheap_init(&adgsnedf_cpu_heap);
 #ifdef CONFIG_RELEASE_MASTER
