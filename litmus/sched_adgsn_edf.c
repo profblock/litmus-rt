@@ -7,7 +7,8 @@
 /*
  * litmus/sched_adgsn_edf.c
  *
- * Implementation of the GSN-EDF scheduling algorithm.
+ * Implementation of the AGSN-EDF scheduling algorithm.
+ * This file is a modification of the GSN-EDF scheduling algorithim
  *
  * This version uses the simple approach and serializes all scheduling
  * decisions by the use of a queue lock. This is probably not the
@@ -385,7 +386,8 @@ static void calculate_estimated_execution_cost(struct task_struct *t, double p, 
 static noinline void adjust_all_service_levels(void){
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
 	// This is how tsk_rt(t)->ctrl_page->service_level;
-	if(agsnedf_total_utilization> NR_CPUS){
+	const int number_of_cpus_held_back = 1;
+	if(agsnedf_total_utilization > (num_online_cpus()-number_of_cpus_held_back)){
 		TRACE("OVER utilization is %d\n", (int)(agsnedf_total_utilization*10000));
 	} else {
 		TRACE("Under utilization is %d\n", (int)(agsnedf_total_utilization*10000));
@@ -433,6 +435,15 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	difference_in_weight = get_estimated_weight(t) - old_est_weight;
 	agsnedf_total_utilization += difference_in_weight;
 	adjust_all_service_levels();
+	
+	// **** TESTING ******
+	// AARON; Note, I want to make sure that the service level will get data sent back and forth
+	TRACE("TASK SERVICE LEVEL :%u\n",tsk_rt(t)->ctrl_page->service_level);
+	tsk_rt(t)->ctrl_page->service_level+=30;
+	//This line is also incorect. No idea why it would let me use it
+	//t->rt_param.job_params.current_service_level+=30;
+	TRACE("***TASK SERVICE LEVEL :%u\n",tsk_rt(t)->ctrl_page->service_level);
+
 	
 	/* prepare for next period */
 	prepare_for_next_period(t);
@@ -1103,7 +1114,6 @@ static long adgsnedf_activate_plugin(void)
 	}
 
 	adgsnedf_setup_domain_proc();
-
 	return 0;
 }
 

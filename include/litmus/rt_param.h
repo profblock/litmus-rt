@@ -85,10 +85,10 @@ typedef enum {
  *				then the "relative_work" can be exact; however, the period may stay the 
  *				same and the amount of computation might be the one to change
  */
-struct rt_service_level{
- 	double 		relative_work;
-	double 		quality_of_service;
-	lt_t 		service_level_period;
+struct rt_service_level {
+ 	double 				relative_work;
+	double		 		quality_of_service;
+	lt_t 				service_level_period;
 	unsigned int 		service_level_number;
 };
  

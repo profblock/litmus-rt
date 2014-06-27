@@ -28,7 +28,9 @@ static inline void setup_release(struct task_struct *t, lt_t release)
 		 * the next job should be released at. We update the control_page one here
 		 */
 	
-		tsk_rt(t)->ctrl_page->service_level = get_current_survice_level(t);
+		//TODO: see if this two pronged service level is working
+		//If it is't cut it
+		//tsk_rt(t)->ctrl_page->service_level = get_current_survice_level(t);
 	}
 	t->rt_param.job_params.deadline = release + get_rt_relative_deadline(t);
 	t->rt_param.job_params.exec_time = 0;
