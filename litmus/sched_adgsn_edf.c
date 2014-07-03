@@ -126,6 +126,11 @@ static struct bheap      adgsnedf_cpu_heap;
 
 
 static double agsnedf_total_utilization;
+static int taskSinceLastReweight; //Keeps track of number of task completions since
+// last rewieght
+static int removeMeTaskCounter; //Temporary, for building. This is used
+//to keep track of the number of tasks that have enacted a reweighting event
+static int changeNow; //if 1, under utilized. if 0, nothing. -1 if over utilized
 
 
 static rt_domain_t adgsnedf;
@@ -383,16 +388,24 @@ static void calculate_estimated_execution_cost(struct task_struct *t, double p, 
 	return;
 }
  
+//TODO
 static noinline void adjust_all_service_levels(void){
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
 	// This is how tsk_rt(t)->ctrl_page->service_level;
 	const int number_of_cpus_held_back = 1;
-	if(agsnedf_total_utilization > (num_online_cpus()-number_of_cpus_held_back)){
-		TRACE("OVER utilization is %d\n", (int)(agsnedf_total_utilization*10000));
+	taskSinceLastReweight++; //Keep track of the number of tasks that have occured since
+	//last rewieghting
+	if(taskSinceLastReweight > 300 ) { //TODO: Pick a better number here
+		if(agsnedf_total_utilization > (num_online_cpus()-number_of_cpus_held_back)){
+			TRACE("OVER utilization is %d\n", (int)(agsnedf_total_utilization*10000));
+			taskSinceLastReweight = 0;
+		} else {
+			TRACE("Under utilization is %d\n", (int)(agsnedf_total_utilization*10000));
+			taskSinceLastReweight = 0;
+		}
 	} else {
-		TRACE("Under utilization is %d\n", (int)(agsnedf_total_utilization*10000));
+		TRACE("No utilization change yet %d, count %d\n", (int)(agsnedf_total_utilization*10000), taskSinceLastReweight);
 	}
-	
 	
 }
  
@@ -413,7 +426,7 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	/* set flags */
 	tsk_rt(t)->completed = 0;
 	
-		old_est_weight = get_estimated_weight(t);
+	old_est_weight = get_estimated_weight(t);
  
 	//TODO: replace the (0.10206228,1) in next line with user-set p and i values
 	/* The values 0.102 and 0.30345 are the a and b values that are calculated from
@@ -438,8 +451,27 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	
 	// **** TESTING ******
 	// AARON; Note, I want to make sure that the service level will get data sent back and forth
-	TRACE("TASK SERVICE LEVEL :%u\n",tsk_rt(t)->ctrl_page->service_level);
-	tsk_rt(t)->ctrl_page->service_level+=30;
+	//TRACE("TASK SERVICE LEVEL :%u\n",tsk_rt(t)->ctrl_page->service_level);
+	
+	//Constantly rotate between service levels
+	
+	if ( changeNow>0 ) {
+		if (tsk_rt(t)->ctrl_page->service_level < 2) {
+			tsk_rt(t)->ctrl_page->service_level+=1;
+		}
+		removeMeTaskCounter++;
+	} else if ( changeNow < 0 ) {
+		if (tsk_rt(t)->ctrl_page->service_level > 0) {
+			tsk_rt(t)->ctrl_page->service_level -= 1;
+		}
+		removeMeTaskCounter++;
+	} 
+	// there are 32 tasks, so, once all 32 have gone. No more changing
+	if (removeMeTaskCounter >=32) {
+		removeMeTaskCounter = 0;
+		changeNow = 0;
+	}
+	
 	//This line is also incorect. No idea why it would let me use it
 	//t->rt_param.job_params.current_service_level+=30;
 	TRACE("***TASK SERVICE LEVEL :%u\n",tsk_rt(t)->ctrl_page->service_level);
@@ -1090,6 +1122,10 @@ static long adgsnedf_activate_plugin(void)
 	cpu_entry_t *entry;
 	
 	agsnedf_total_utilization = 0;
+	taskSinceLastReweight = 0;
+	removeMeTaskCounter=0; //TODO: REMOVE Later
+	changeNow=0; 
+
 
 	bheap_init(&adgsnedf_cpu_heap);
 #ifdef CONFIG_RELEASE_MASTER
