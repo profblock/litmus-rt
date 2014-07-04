@@ -399,9 +399,11 @@ static noinline void adjust_all_service_levels(void){
 		if(agsnedf_total_utilization > (num_online_cpus()-number_of_cpus_held_back)){
 			TRACE("OVER utilization is %d\n", (int)(agsnedf_total_utilization*10000));
 			taskSinceLastReweight = 0;
+			changeNow = -1;
 		} else {
 			TRACE("Under utilization is %d\n", (int)(agsnedf_total_utilization*10000));
 			taskSinceLastReweight = 0;
+			changeNow = 1;
 		}
 	} else {
 		TRACE("No utilization change yet %d, count %d\n", (int)(agsnedf_total_utilization*10000), taskSinceLastReweight);
