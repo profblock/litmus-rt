@@ -8,6 +8,10 @@
 
 static inline void setup_release(struct task_struct *t, lt_t release)
 {
+	int relative_work;
+	int control1;
+	int control2;
+	int serviceLevel = tsk_rt(t)->ctrl_page->service_level;
 	/* prepare next release */
 	t->rt_param.job_params.release = release;
 		
@@ -16,9 +20,17 @@ static inline void setup_release(struct task_struct *t, lt_t release)
 	 */
 	if (get_service_levels(t))  {
 		struct rt_service_level current_service_level = 
-			get_service_levels(t)[get_current_survice_level(t)];
-		
+			get_service_levels(t)[serviceLevel];
+		//tsk_rt(t)->job_params.current_service_level
+		//tsk_rt(t)->ctrl_page->service_level
 		lt_t relative_deadline = current_service_level.service_level_period;
+		//TODO: Remove printing
+		relative_work = (int)(1000*current_service_level.relative_work);
+		control1 = serviceLevel;
+		control2 = current_service_level.service_level_number;
+		TRACE_TASK(t, "service level %d, level's service: %d,  relative work %d\n", control1, control2, relative_work);
+		TRACE_TASK(t, "Changing relative_deadline from %llu to %llu. Other %llu\n",t->rt_param.task_params.relative_deadline, relative_deadline, get_rt_relative_deadline(t));
+		TRACE("Setup_release 2 : %d\n", tsk_rt(t)->ctrl_page->service_level);
 		t->rt_param.task_params.relative_deadline = relative_deadline;
 		t->rt_param.task_params.period = relative_deadline;
 		
@@ -31,10 +43,19 @@ static inline void setup_release(struct task_struct *t, lt_t release)
 		//TODO: see if this two pronged service level is working
 		//If it is't cut it
 		//tsk_rt(t)->ctrl_page->service_level = get_current_survice_level(t);
+		TRACE("Setup_release 3 : %d\n", tsk_rt(t)->ctrl_page->service_level);
+	} else {
+		TRACE("Womp Womp\n");
 	}
+	TRACE("Setup_release 4 : %d\n", tsk_rt(t)->ctrl_page->service_level);
 	t->rt_param.job_params.deadline = release + get_rt_relative_deadline(t);
+// 	TRACE_TASK(t, "Relative Deadline %llu\n",
+// 			   get_rt_relative_deadline(t));
+// 	TRACE_TASK(t, "Absolute Deadline %llu\n",
+// 			   t->rt_param.job_params.deadline);
 	t->rt_param.job_params.exec_time = 0;
 
+	TRACE("Setup_release 5 : %d\n", tsk_rt(t)->ctrl_page->service_level);
 	/* update job sequence number */
 	t->rt_param.job_params.job_no++;
 }

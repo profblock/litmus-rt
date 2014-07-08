@@ -460,11 +460,17 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	if ( changeNow>0 ) {
 		if (tsk_rt(t)->ctrl_page->service_level < 2) {
 			tsk_rt(t)->ctrl_page->service_level+=1;
+			//Change period
+// 			tsk_rt(t)->task_params.period = tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].service_level_period;
+// 			tsk_rt(t)->task_params.relative_deadline = tsk_rt(t)->task_params.period;
 		}
 		removeMeTaskCounter++;
 	} else if ( changeNow < 0 ) {
 		if (tsk_rt(t)->ctrl_page->service_level > 0) {
 			tsk_rt(t)->ctrl_page->service_level -= 1;
+			//Change period
+// 			tsk_rt(t)->task_params.period = tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].service_level_period;
+// 			tsk_rt(t)->task_params.relative_deadline = tsk_rt(t)->task_params.period;
 		}
 		removeMeTaskCounter++;
 	} 
@@ -477,10 +483,12 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	//This line is also incorect. No idea why it would let me use it
 	//t->rt_param.job_params.current_service_level+=30;
 	TRACE("***TASK SERVICE LEVEL :%u\n",tsk_rt(t)->ctrl_page->service_level);
-
+	TRACE("A-GSN-EDF-Period: %llu\n", tsk_rt(t)->task_params.period);
+	TRACE("A-GSN-EDF-Deadline: %llu\n", tsk_rt(t)->task_params.relative_deadline);
 	
 	/* prepare for next period */
 	prepare_for_next_period(t);
+	TRACE("ADGSN-EDF : %d\n", tsk_rt(t)->ctrl_page->service_level);
 	if (is_early_releasing(t) || is_released(t, litmus_clock()))
 		sched_trace_task_release(t);
 	/* unlink */
