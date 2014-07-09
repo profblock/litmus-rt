@@ -1,9 +1,5 @@
-//TODO: Upon new task arrival. Set up service levels
-//TODO: Verify that total estimated weight is calculated correctly
-//TODO: Upon Job completition: Determine if service levels should change
 //TODO: Remove any bugs that might occur by ovverunns
 //TODO: Clean up code to get rid of locking from "coppying" GSN-EDF
-//TODO-NOTE: Verify emperically that execution_time is actually calculating what it seems like it should
 /*
  * litmus/sched_adgsn_edf.c
  *
@@ -124,6 +120,15 @@ cpu_entry_t* adgsnedf_cpus[NR_CPUS];
 static struct bheap_node adgsnedf_heap_node[NR_CPUS];
 static struct bheap      adgsnedf_cpu_heap;
 
+
+//TODO-AARON: The number here limits the number of real time threads. 
+//Need to make this more general or fix
+//Should make this linked list to be more general and flexible
+static struct task_struct* all_tasks[100]; 
+
+//TODO-AARON: This is part of the hacky fix above used to keep track of the number
+//of tasks in the system and add them to the task_struct. 
+static int currentNumberTasks;
 
 static double agsnedf_total_utilization;
 static int taskSinceLastReweight; //Keeps track of number of task completions since
@@ -390,11 +395,14 @@ static void calculate_estimated_execution_cost(struct task_struct *t, double p, 
  
 //TODO
 static noinline void adjust_all_service_levels(void){
+	int count;
+	struct task_struct *temp;
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
 	// This is how tsk_rt(t)->ctrl_page->service_level;
 	const int number_of_cpus_held_back = 1;
 	taskSinceLastReweight++; //Keep track of the number of tasks that have occured since
 	//last rewieghting
+	
 	if(taskSinceLastReweight > 300 ) { //TODO: Pick a better number here
 		if(agsnedf_total_utilization > (num_online_cpus()-number_of_cpus_held_back)){
 			TRACE("OVER utilization is %d\n", (int)(agsnedf_total_utilization*10000));
@@ -409,6 +417,16 @@ static noinline void adjust_all_service_levels(void){
 		TRACE("No utilization change yet %d, count %d\n", (int)(agsnedf_total_utilization*10000), taskSinceLastReweight);
 	}
 	
+	//TODO: Testing all tasks 
+	TRACE("Current number Tasks %d\n", currentNumberTasks);
+	for(count = 0;count < currentNumberTasks; count++) {
+		temp = all_tasks[count]; 
+		if ( temp == 0 ) {
+			TRACE("Womp Womp\n");
+		} else {
+			TRACE(" Task number %d, service level %u\n", count, tsk_rt(temp)->ctrl_page->service_level);
+		}
+	}	
 }
  
  
@@ -655,10 +673,18 @@ static void adgsnedf_task_new(struct task_struct * t, int on_rq, int is_schedule
 {
 	unsigned long 		flags;
 	cpu_entry_t* 		entry;
+	int localNumber; 
+
+
 
 	TRACE("adgsn edf: task new %d\n", t->pid);
 
 	raw_spin_lock_irqsave(&adgsnedf_lock, flags);
+
+	localNumber = currentNumberTasks; 
+	all_tasks[currentNumberTasks] = t;
+	currentNumberTasks++;
+
 
 	/* TODO: allow for better setting of estimated execution
 	 * time.
@@ -692,6 +718,7 @@ static void adgsnedf_task_new(struct task_struct * t, int on_rq, int is_schedule
 	if (is_running(t))
 		adgsnedf_job_arrival(t);
 	raw_spin_unlock_irqrestore(&adgsnedf_lock, flags);
+	TRACE("Adding task number %d\n", localNumber);
 }
 
 static void adgsnedf_task_wake_up(struct task_struct *task)
@@ -1135,6 +1162,7 @@ static long adgsnedf_activate_plugin(void)
 	taskSinceLastReweight = 0;
 	removeMeTaskCounter=0; //TODO: REMOVE Later
 	changeNow=0; 
+	currentNumberTasks = 0;
 
 
 	bheap_init(&adgsnedf_cpu_heap);
