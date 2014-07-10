@@ -37,6 +37,8 @@
 
 #include <linux/module.h>
 
+#include <float.h>
+
 /* Overview of adgsn-EDF operations.
  *
  * For a detailed explanation of adgsn-EDF have a look at the FMLP paper. This
@@ -106,6 +108,7 @@
 
 /* cpu_entry_t - maintain the linked and scheduled state
  */
+ 
 typedef struct  {
 	int 			cpu;
 	struct task_struct*	linked;		/* only RT tasks */
@@ -393,17 +396,32 @@ static void calculate_estimated_execution_cost(struct task_struct *t, double p, 
 	return;
 }
  
-//TODO
+  
+//Should only be called by job_completion. Thus, caller holds adgnedf_lock
 static noinline void adjust_all_service_levels(void){
 	int count;
 	struct task_struct *temp;
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
 	// This is how tsk_rt(t)->ctrl_page->service_level;
 	const int number_of_cpus_held_back = 1;
+	struct task_struct* local_copy[currentNumberTasks];
+	int outerIndex;
+	int innerIndex;
+	int lowerIndex;
+	int upperIndex;
+	double valueDensityLowerIndex;
+	double valueDensityUpperIndex;
+	
+	double QoSLowerIndex; 
+	double QoSUpperIndex; 
+	
+	int tmpValue;
+	
 	taskSinceLastReweight++; //Keep track of the number of tasks that have occured since
 	//last rewieghting
 	
 	if(taskSinceLastReweight > 300 ) { //TODO: Pick a better number here
+		//TODO: Improve Trigger conditions
 		if(agsnedf_total_utilization > (num_online_cpus()-number_of_cpus_held_back)){
 			TRACE("OVER utilization is %d\n", (int)(agsnedf_total_utilization*10000));
 			taskSinceLastReweight = 0;
@@ -417,17 +435,117 @@ static noinline void adjust_all_service_levels(void){
 		TRACE("No utilization change yet %d, count %d\n", (int)(agsnedf_total_utilization*10000), taskSinceLastReweight);
 	}
 	
-	//TODO: Testing all tasks 
-	TRACE("Current number Tasks %d\n", currentNumberTasks);
+	//Copying array to local copy
 	for(count = 0;count < currentNumberTasks; count++) {
-		temp = all_tasks[count]; 
-		if ( temp == 0 ) {
-			TRACE("Womp Womp\n");
+		local_copy[count] = all_tasks[count];
+	}
+	
+	
+	//sort local_copy based on value density.. Assumes linear relationship
+	for(outerIndex = 1; outerIndex <= currentNumberTasks - 1 ; outerIndex++) {
+		innerIndex = outerIndex;
+		
+		upperIndex = innerIndex;
+		lowerIndex = upperIndex-1;
+		QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].quality_of_service;
+		QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].quality_of_service;
+
+
+		if (get_estimated_weight(local_copy[upperIndex]) <= 0 ) {
+			valueDensityUpperIndex = DBL_MAX;
 		} else {
-			TRACE(" Task number %d, service level %u\n", count, tsk_rt(temp)->ctrl_page->service_level);
+			valueDensityUpperIndex =  QoSUpperIndex / get_estimated_weight(local_copy[upperIndex]);
 		}
-	}	
+		
+		if (get_estimated_weight(local_copy[lowerIndex]) <= 0 ) {
+			valueDensityLowerIndex = DBL_MAX;
+		} else {
+			valueDensityLowerIndex =  QoSLowerIndex / get_estimated_weight(local_copy[lowerIndex]);
+		}
+
+		while (innerIndex > 0 && ( valueDensityUpperIndex < valueDensityLowerIndex)){
+
+			temp = local_copy[upperIndex];
+			local_copy[upperIndex] = local_copy[lowerIndex];
+			local_copy[lowerIndex] = temp;
+			
+			innerIndex--;
+			if (innerIndex > 0 ) {
+				upperIndex = innerIndex;
+				lowerIndex = upperIndex-1;
+			
+				QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].quality_of_service;
+				QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].quality_of_service;
+
+
+				if (get_estimated_weight(local_copy[upperIndex]) <= 0 ) {
+					valueDensityUpperIndex = DBL_MAX;
+				} else {
+					valueDensityUpperIndex =  QoSUpperIndex / get_estimated_weight(local_copy[upperIndex]);
+				}
+		
+				if (get_estimated_weight(local_copy[lowerIndex]) <= 0 ) {
+					valueDensityLowerIndex = DBL_MAX;
+				} else {
+					valueDensityLowerIndex =  QoSLowerIndex / get_estimated_weight(local_copy[lowerIndex]);
+				}
+			}
+
+		}
+	}
+	
+	//sort local_copy based on value density.. Assumes linear relationship
+/*	for(outerIndex = 0; outerIndex < currentNumberTasks; outerIndex++) {
+		innerIndex = outerIndex;
+		
+		upperIndex = innerIndex;
+		QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].quality_of_service;
+
+		//If the estimated weight is zero or negative, it's a bad prediction
+		//So, make the value density equal to the DBL_MAX
+		if (get_estimated_weight(local_copy[upperIndex])<= 0 ) {
+			valueDensityUpperIndex = DBL_MAX;
+		} else {
+			valueDensityUpperIndex =  QoSUpperIndex / get_estimated_weight(local_copy[upperIndex]);
+		}
+		
+		TRACE("outerIndex %d\n", outerIndex);
+
+		tmpValue = (int)(QoSUpperIndex*10000);
+		TRACE("Upper index QoS: %d\n", tmpValue);
+		
+		tmpValue = (int)(get_estimated_weight(local_copy[upperIndex])*10000);
+		TRACE("Upper index estWeight: %d\n", tmpValue);
+		
+		tmpValue = (int)(valueDensityUpperIndex);
+		TRACE("Upper index value density: %d\n", tmpValue);
+	}*/
+	
+// 	for(upperIndex = 0; upperIndex < currentNumberTasks; upperIndex++) {
+// 		QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].quality_of_service;
+// 
+// 		//If the estimated weight is zero or negative, it's a bad prediction
+// 		//So, make the value density equal to the DBL_MAX
+// 		if (get_estimated_weight(local_copy[upperIndex])<= 0 ) {
+// 			valueDensityUpperIndex = DBL_MAX;
+// 		} else {
+// 			valueDensityUpperIndex =  QoSUpperIndex / get_estimated_weight(local_copy[upperIndex]);
+// 		}
+// 		
+// 		TRACE("outerIndex %d\n", upperIndex);
+// 
+// 		tmpValue = (int)(QoSUpperIndex*10000);
+// 		TRACE("Upper index QoS: %d\n", tmpValue);
+// 		
+// 		tmpValue = (int)(get_estimated_weight(local_copy[upperIndex])*10000);
+// 		TRACE("Upper index estWeight: %d\n", tmpValue);
+// 		
+// 		tmpValue = (int)(valueDensityUpperIndex);
+// 		TRACE("Upper index value density: %d\n", tmpValue);
+// 	}
 }
+
+
  
  
  
@@ -466,7 +584,9 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	 */
  
 	difference_in_weight = get_estimated_weight(t) - old_est_weight;
+
 	agsnedf_total_utilization += difference_in_weight;
+	
 	adjust_all_service_levels();
 	
 	// **** TESTING ******
