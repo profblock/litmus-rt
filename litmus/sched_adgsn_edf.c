@@ -420,7 +420,6 @@ static noinline void adjust_all_service_levels(void){
 	double QoSUpperIndex; 
 	
 	int aConvertValue;
-	int tmpValue;
 	double localTotalUtilization = 0;
 	double maxUtilization = num_online_cpus()-number_of_cpus_held_back;
 	//This is the max_level 
@@ -433,21 +432,6 @@ static noinline void adjust_all_service_levels(void){
 	taskSinceLastReweight++; //Keep track of the number of tasks that have occured since
 	//last rewieghting
 	
-// 	if( taskSinceLastReweight > 300 ) { //TODO: Pick a better number here
-// 		//TODO: Improve Trigger conditions
-// 		if(agsnedf_total_utilization > (num_online_cpus()-number_of_cpus_held_back)){
-// 			TRACE("OVER utilization is %d\n", (int)(agsnedf_total_utilization*10000));
-// 			taskSinceLastReweight = 0;
-// 			changeNow = -1;
-// 		} else {
-// 			TRACE("Under utilization is %d\n", (int)(agsnedf_total_utilization*10000));
-// 			taskSinceLastReweight = 0;
-// 			changeNow = 1;
-// 		}
-// 	} else {
-// 		TRACE("No utilization change yet %d, count %d\n", (int)(agsnedf_total_utilization*10000), taskSinceLastReweight);
-// 	}
-	
 	if( taskSinceLastReweight > 300 ) { //TODO: Pick a better number here
 		taskSinceLastReweight = 0;
 		//Copying array to local copy
@@ -457,6 +441,10 @@ static noinline void adjust_all_service_levels(void){
 	
 
 		//sort local_copy based on value density.. Assumes linear relationship
+		// The rather complicated formulas in here come from Aaron Block's dissertation
+		// specifically formula 6.11 on page 258
+		// you can get Aaron's dissertation here: http://cs.unc.edu/~block/aarondiss.pdf
+		
 		for(outerIndex = 1; outerIndex <= currentNumberTasks - 1 ; outerIndex++) {
 			innerIndex = outerIndex;
 		
@@ -518,48 +506,81 @@ static noinline void adjust_all_service_levels(void){
 		//Local_copy is now sorted
 		
 		//Now need to maximize
-		//Step 1 : Set all tasks to base level
+		//Step 1 : Set all tasks to base level (level 0)
 		//Step 2 : Increase tasks from top to lowest_priorty_cpu()
 		//Step 3 : taskLevel
 
 		localTotalUtilization = 0;
-		//Set all levels to outerLevels
+	
+		//Step 1: set all tasks to their base service level (level 0)
+		//This allows for us to get an assessment of how much "extra" capacity we have
+		
 		for(outerIndex=0; outerIndex < currentNumberTasks; outerIndex++) {
+			//taskLevel corresponds to the calculated desired index for all elements
+			//as sorted by the above. 
+			//Since everything starts off at zero, taskLevel starts at zero.
 			taskLevel[outerIndex] = 0;
-			//If it is 0, then the estimated weight is correct
+			
+		
+			// If it is 0, then the estimated weight is the correct amount to to add to
+			// localTotalUtiization 
+			// FYI aConvertValue is a temp used for tracing
 			if (tsk_rt(local_copy[outerIndex])->ctrl_page->service_level==0) {
 				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]);
+				
+				//aConvertValue is just a temp used for tracing
 				aConvertValue = 10000*get_estimated_weight(local_copy[outerIndex]);
 				TRACE("-LEVEL 0: Task %d, weight %d\n", outerIndex, aConvertValue);
 				
 			} else {
-				//get weight of everything at base 
+				//If a task has a service level that isn't currently zero, then
+				//we need to calculate it's weight if it were at service level zero. 
 				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]) / tsk_rt(local_copy[outerIndex])->task_params.service_levels[tsk_rt(local_copy[outerIndex])->ctrl_page->service_level].relative_work;
+				
 				aConvertValue = 10000*get_estimated_weight(local_copy[outerIndex]);
 				TRACE("-LEVEL %d: Task %d, weight %d\n", tsk_rt(local_copy[outerIndex])->ctrl_page->service_level, outerIndex, aConvertValue);
 			}
+			
 			aConvertValue = 10000*weightLevel[outerIndex];
 			TRACE("Task %d, base weight %d\n", outerIndex, aConvertValue);
+			
+			//Calculate the total utilization. 
 			localTotalUtilization+=weightLevel[outerIndex];
+			
+			
 			aConvertValue = 10000*localTotalUtilization;
 			TRACE("Total Utilization %d\n", aConvertValue);
 		}
 		
-		//double maxUtilization
+		//Step 2 : Increase tasks from top to lowest_priorty_cpu()
+		//Since all tasks are in sorted order at service level 0
+		//we start from the first task and attempt to increase its service level 
+		//to the maximum value without overloading the system. 
+		//Even if we overload on one task, we still keep on increasing other tasks
+		//because we might be able to increase their levels slightly 
+		
 		for(outerIndex=0; outerIndex < currentNumberTasks; outerIndex++) {
+
 			//This assumes that all tasks have the same max service level
-			//attempt to increase at each service level 
-			
+			//Increase servie level to the maximum possible value. 
+			//We start at 1 because every task is already at zero. 			
 			for( innerIndex = 1; innerIndex <= max_level; innerIndex++) {
+				//The value the weight would be if we increased the weight of the task
 				calculationFactor = weightLevel[outerIndex] * tsk_rt(local_copy[outerIndex])->task_params.service_levels[innerIndex].relative_work;
+				
 				aConvertValue = 10000*calculationFactor;
 				TRACE("Temp Level %d, Task %d, Calculation Factor %d\n", innerIndex, outerIndex, aConvertValue);
+				
+				//If we increased it, would the system be over utilized?
 				if( (localTotalUtilization-weightLevel[outerIndex]+calculationFactor) < maxUtilization) {
 					TRACE("Increase task %d, to Level %d\n", outerIndex, innerIndex);
+					//Increasing the weight of the task
 					taskLevel[outerIndex] = innerIndex;
 				}
 			}
 			
+			//Change the total utilization by subtracting the old weight and adding the new weight
+			//We don't actually change the weight here though
 			localTotalUtilization = localTotalUtilization-weightLevel[outerIndex] + weightLevel[outerIndex]* tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].relative_work;
 			aConvertValue = weightLevel[outerIndex];
 			TRACE("Task %d, subtracted Weight %d\n", outerIndex, aConvertValue);
@@ -572,66 +593,15 @@ static noinline void adjust_all_service_levels(void){
 // 			for(innerIndex = tsk_rt(local_copy[outerIndex])->ctrl_page->service_level; innerIndex < max_level; innerIndex) { 
 // 				
 // 			}
-			//get_estimated_weight(local_copy[outerIndex]);
-			//localTotalUtilization 
-			//maxUtilization
 		
 		}
+		
+		// Go through and actually change the weight of each task now that all the work is done.
 		for(outerIndex=0; outerIndex < currentNumberTasks; outerIndex++) {
 			tsk_rt(local_copy[outerIndex])->ctrl_page->service_level = taskLevel[outerIndex];
 			TRACE("&&The service level for %d is %d\n", outerIndex, taskLevel[outerIndex]);
 		}
-	}
-
-	//sort local_copy based on value density.. Assumes linear relationship
-/*	for(outerIndex = 0; outerIndex < currentNumberTasks; outerIndex++) {
-		innerIndex = outerIndex;
-		
-		upperIndex = innerIndex;
-		QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].quality_of_service;
-
-		//If the estimated weight is zero or negative, it's a bad prediction
-		//So, make the value density equal to the DBL_MAX
-		if (get_estimated_weight(local_copy[upperIndex])<= 0 ) {
-			valueDensityUpperIndex = DBL_MAX;
-		} else {
-			valueDensityUpperIndex =  QoSUpperIndex / get_estimated_weight(local_copy[upperIndex]);
-		}
-		
-		TRACE("outerIndex %d\n", outerIndex);
-
-		tmpValue = (int)(QoSUpperIndex*10000);
-		TRACE("Upper index QoS: %d\n", tmpValue);
-		
-		tmpValue = (int)(get_estimated_weight(local_copy[upperIndex])*10000);
-		TRACE("Upper index estWeight: %d\n", tmpValue);
-		
-		tmpValue = (int)(valueDensityUpperIndex);
-		TRACE("Upper index value density: %d\n", tmpValue);
-	}*/
-	
-// 	for(upperIndex = 0; upperIndex < currentNumberTasks; upperIndex++) {
-// 		QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].quality_of_service;
-// 
-// 		//If the estimated weight is zero or negative, it's a bad prediction
-// 		//So, make the value density equal to the DBL_MAX
-// 		if (get_estimated_weight(local_copy[upperIndex])<= 0 ) {
-// 			valueDensityUpperIndex = DBL_MAX;
-// 		} else {
-// 			valueDensityUpperIndex =  QoSUpperIndex / get_estimated_weight(local_copy[upperIndex]);
-// 		}
-// 		
-// 		TRACE("outerIndex %d\n", upperIndex);
-// 
-// 		tmpValue = (int)(QoSUpperIndex*10000);
-// 		TRACE("Upper index QoS: %d\n", tmpValue);
-// 		
-// 		tmpValue = (int)(get_estimated_weight(local_copy[upperIndex])*10000);
-// 		TRACE("Upper index estWeight: %d\n", tmpValue);
-// 		
-// 		tmpValue = (int)(valueDensityUpperIndex);
-// 		TRACE("Upper index value density: %d\n", tmpValue);
-// 	}
+	}	
 }
 
 
