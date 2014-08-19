@@ -405,95 +405,184 @@ static noinline void adjust_all_service_levels(void){
 	// This is how tsk_rt(t)->ctrl_page->service_level;
 	const int number_of_cpus_held_back = 1;
 	struct task_struct* local_copy[currentNumberTasks];
+	int taskLevel[currentNumberTasks];
+	double weightLevel[currentNumberTasks];
 	int outerIndex;
 	int innerIndex;
 	int lowerIndex;
 	int upperIndex;
 	double valueDensityLowerIndex;
 	double valueDensityUpperIndex;
+	double estWeightDiffUpper;
+	double estWeightDiffLower;
 	
 	double QoSLowerIndex; 
 	double QoSUpperIndex; 
 	
+	int aConvertValue;
 	int tmpValue;
+	double localTotalUtilization = 0;
+	double maxUtilization = num_online_cpus()-number_of_cpus_held_back;
+	//This is the max_level 
+	const int max_level = 2; //max level should be 3, but crashing. So let's try 2
+	const int lowest_level = 0; //lowest service level level should be 3, but crashing. So let's try 2
+	
+	//
+	double calculationFactor;
 	
 	taskSinceLastReweight++; //Keep track of the number of tasks that have occured since
 	//last rewieghting
 	
-	if(taskSinceLastReweight > 300 ) { //TODO: Pick a better number here
-		//TODO: Improve Trigger conditions
-		if(agsnedf_total_utilization > (num_online_cpus()-number_of_cpus_held_back)){
-			TRACE("OVER utilization is %d\n", (int)(agsnedf_total_utilization*10000));
-			taskSinceLastReweight = 0;
-			changeNow = -1;
-		} else {
-			TRACE("Under utilization is %d\n", (int)(agsnedf_total_utilization*10000));
-			taskSinceLastReweight = 0;
-			changeNow = 1;
-		}
-	} else {
-		TRACE("No utilization change yet %d, count %d\n", (int)(agsnedf_total_utilization*10000), taskSinceLastReweight);
-	}
+// 	if( taskSinceLastReweight > 300 ) { //TODO: Pick a better number here
+// 		//TODO: Improve Trigger conditions
+// 		if(agsnedf_total_utilization > (num_online_cpus()-number_of_cpus_held_back)){
+// 			TRACE("OVER utilization is %d\n", (int)(agsnedf_total_utilization*10000));
+// 			taskSinceLastReweight = 0;
+// 			changeNow = -1;
+// 		} else {
+// 			TRACE("Under utilization is %d\n", (int)(agsnedf_total_utilization*10000));
+// 			taskSinceLastReweight = 0;
+// 			changeNow = 1;
+// 		}
+// 	} else {
+// 		TRACE("No utilization change yet %d, count %d\n", (int)(agsnedf_total_utilization*10000), taskSinceLastReweight);
+// 	}
 	
-	//Copying array to local copy
-	for(count = 0;count < currentNumberTasks; count++) {
-		local_copy[count] = all_tasks[count];
-	}
-	
-	
-	//sort local_copy based on value density.. Assumes linear relationship
-	for(outerIndex = 1; outerIndex <= currentNumberTasks - 1 ; outerIndex++) {
-		innerIndex = outerIndex;
-		
-		upperIndex = innerIndex;
-		lowerIndex = upperIndex-1;
-		QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].quality_of_service;
-		QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].quality_of_service;
-
-
-		if (get_estimated_weight(local_copy[upperIndex]) <= 0 ) {
-			valueDensityUpperIndex = DBL_MAX;
-		} else {
-			valueDensityUpperIndex =  QoSUpperIndex / get_estimated_weight(local_copy[upperIndex]);
+	if( taskSinceLastReweight > 300 ) { //TODO: Pick a better number here
+		taskSinceLastReweight = 0;
+		//Copying array to local copy
+		for(count = 0;count < currentNumberTasks; count++) {
+			local_copy[count] = all_tasks[count];
 		}
+	
+
+		//sort local_copy based on value density.. Assumes linear relationship
+		for(outerIndex = 1; outerIndex <= currentNumberTasks - 1 ; outerIndex++) {
+			innerIndex = outerIndex;
 		
-		if (get_estimated_weight(local_copy[lowerIndex]) <= 0 ) {
-			valueDensityLowerIndex = DBL_MAX;
-		} else {
-			valueDensityLowerIndex =  QoSLowerIndex / get_estimated_weight(local_copy[lowerIndex]);
-		}
+			upperIndex = innerIndex;
+			lowerIndex = upperIndex-1;
+			QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[upperIndex])->task_params.service_levels[lowest_level].quality_of_service;
+			QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
 
-		while (innerIndex > 0 && ( valueDensityUpperIndex < valueDensityLowerIndex)){
-
-			temp = local_copy[upperIndex];
-			local_copy[upperIndex] = local_copy[lowerIndex];
-			local_copy[lowerIndex] = temp;
-			
-			innerIndex--;
-			if (innerIndex > 0 ) {
-				upperIndex = innerIndex;
-				lowerIndex = upperIndex-1;
-			
-				QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].quality_of_service;
-				QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].quality_of_service;
-
-
-				if (get_estimated_weight(local_copy[upperIndex]) <= 0 ) {
-					valueDensityUpperIndex = DBL_MAX;
-				} else {
-					valueDensityUpperIndex =  QoSUpperIndex / get_estimated_weight(local_copy[upperIndex]);
-				}
+			estWeightDiffUpper = (get_estimated_weight(local_copy[upperIndex])/tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].relative_work) * 
+			(tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].relative_work - 1 );
+			if (estWeightDiffUpper <= 0 ) {
+				valueDensityUpperIndex = DBL_MAX;
+			} else {
+				valueDensityUpperIndex =  QoSUpperIndex / estWeightDiffUpper;
+			}
 		
-				if (get_estimated_weight(local_copy[lowerIndex]) <= 0 ) {
-					valueDensityLowerIndex = DBL_MAX;
-				} else {
-					valueDensityLowerIndex =  QoSLowerIndex / get_estimated_weight(local_copy[lowerIndex]);
-				}
+			estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
+			(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
+			if (estWeightDiffLower <= 0 ) {
+				valueDensityLowerIndex = DBL_MAX;
+			} else {
+				valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
 			}
 
+
+			while (innerIndex > 0 && ( valueDensityUpperIndex < valueDensityLowerIndex)){
+
+				temp = local_copy[upperIndex];
+				local_copy[upperIndex] = local_copy[lowerIndex];
+				local_copy[lowerIndex] = temp;
+			
+				innerIndex--;
+				if (innerIndex > 0 ) {
+					upperIndex = innerIndex;
+					lowerIndex = upperIndex-1;
+			
+					QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[upperIndex])->task_params.service_levels[lowest_level].quality_of_service;
+					QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
+
+					estWeightDiffUpper = (get_estimated_weight(local_copy[upperIndex])/tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].relative_work) * 
+					(tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].relative_work - 1 );
+					if (estWeightDiffUpper <= 0 ) {
+						valueDensityUpperIndex = DBL_MAX;
+					} else {
+						valueDensityUpperIndex =  QoSUpperIndex / estWeightDiffUpper;
+					}
+		
+					estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
+					(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
+					if (estWeightDiffLower <= 0 ) {
+						valueDensityLowerIndex = DBL_MAX;
+					} else {
+						valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
+					}
+				}
+			}
+		}
+	
+		//Local_copy is now sorted
+		
+		//Now need to maximize
+		//Step 1 : Set all tasks to base level
+		//Step 2 : Increase tasks from top to lowest_priorty_cpu()
+		//Step 3 : taskLevel
+
+		localTotalUtilization = 0;
+		//Set all levels to outerLevels
+		for(outerIndex=0; outerIndex < currentNumberTasks; outerIndex++) {
+			taskLevel[outerIndex] = 0;
+			//If it is 0, then the estimated weight is correct
+			if (tsk_rt(local_copy[outerIndex])->ctrl_page->service_level==0) {
+				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]);
+				aConvertValue = 10000*get_estimated_weight(local_copy[outerIndex]);
+				TRACE("-LEVEL 0: Task %d, weight %d\n", outerIndex, aConvertValue);
+				
+			} else {
+				//get weight of everything at base 
+				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]) / tsk_rt(local_copy[outerIndex])->task_params.service_levels[tsk_rt(local_copy[outerIndex])->ctrl_page->service_level].relative_work;
+				aConvertValue = 10000*get_estimated_weight(local_copy[outerIndex]);
+				TRACE("-LEVEL %d: Task %d, weight %d\n", tsk_rt(local_copy[outerIndex])->ctrl_page->service_level, outerIndex, aConvertValue);
+			}
+			aConvertValue = 10000*weightLevel[outerIndex];
+			TRACE("Task %d, base weight %d\n", outerIndex, aConvertValue);
+			localTotalUtilization+=weightLevel[outerIndex];
+			aConvertValue = 10000*localTotalUtilization;
+			TRACE("Total Utilization %d\n", aConvertValue);
+		}
+		
+		//double maxUtilization
+		for(outerIndex=0; outerIndex < currentNumberTasks; outerIndex++) {
+			//This assumes that all tasks have the same max service level
+			//attempt to increase at each service level 
+			
+			for( innerIndex = 1; innerIndex <= max_level; innerIndex++) {
+				calculationFactor = weightLevel[outerIndex] * tsk_rt(local_copy[outerIndex])->task_params.service_levels[innerIndex].relative_work;
+				aConvertValue = 10000*calculationFactor;
+				TRACE("Temp Level %d, Task %d, Calculation Factor %d\n", innerIndex, outerIndex, aConvertValue);
+				if( (localTotalUtilization-weightLevel[outerIndex]+calculationFactor) < maxUtilization) {
+					TRACE("Increase task %d, to Level %d\n", outerIndex, innerIndex);
+					taskLevel[outerIndex] = innerIndex;
+				}
+			}
+			
+			localTotalUtilization = localTotalUtilization-weightLevel[outerIndex] + weightLevel[outerIndex]* tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].relative_work;
+			aConvertValue = weightLevel[outerIndex];
+			TRACE("Task %d, subtracted Weight %d\n", outerIndex, aConvertValue);
+			
+			aConvertValue = 10000*weightLevel[outerIndex]* tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].relative_work;
+			TRACE("Task %d, added Weight %d\n", outerIndex, aConvertValue);
+			
+			aConvertValue = 10000*localTotalUtilization;
+			TRACE("Task %d, the total Utilization %d\n", outerIndex, aConvertValue);
+// 			for(innerIndex = tsk_rt(local_copy[outerIndex])->ctrl_page->service_level; innerIndex < max_level; innerIndex) { 
+// 				
+// 			}
+			//get_estimated_weight(local_copy[outerIndex]);
+			//localTotalUtilization 
+			//maxUtilization
+		
+		}
+		for(outerIndex=0; outerIndex < currentNumberTasks; outerIndex++) {
+			tsk_rt(local_copy[outerIndex])->ctrl_page->service_level = taskLevel[outerIndex];
+			TRACE("&&The service level for %d is %d\n", outerIndex, taskLevel[outerIndex]);
 		}
 	}
-	
+
 	//sort local_copy based on value density.. Assumes linear relationship
 /*	for(outerIndex = 0; outerIndex < currentNumberTasks; outerIndex++) {
 		innerIndex = outerIndex;
@@ -546,6 +635,7 @@ static noinline void adjust_all_service_levels(void){
 }
 
 
+
  
  
  
@@ -594,7 +684,7 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	//TRACE("TASK SERVICE LEVEL :%u\n",tsk_rt(t)->ctrl_page->service_level);
 	
 	//Constantly rotate between service levels
-	
+/*	
 	if ( changeNow>0 ) {
 		if (tsk_rt(t)->ctrl_page->service_level < 2) {
 			tsk_rt(t)->ctrl_page->service_level+=1;
@@ -617,6 +707,7 @@ static noinline void job_completion(struct task_struct *t, int forced)
 		removeMeTaskCounter = 0;
 		changeNow = 0;
 	}
+*/
 	
 	//This line is also incorect. No idea why it would let me use it
 	//t->rt_param.job_params.current_service_level+=30;
