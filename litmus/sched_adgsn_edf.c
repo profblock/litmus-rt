@@ -403,7 +403,7 @@ static noinline void adjust_all_service_levels(void){
 	struct task_struct *temp;
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
 	// This is how tsk_rt(t)->ctrl_page->service_level;
-	const int number_of_cpus_held_back = 1;
+	const int number_of_cpus_held_back = 2;
 	struct task_struct* local_copy[currentNumberTasks];
 	int taskLevel[currentNumberTasks];
 	double weightLevel[currentNumberTasks];
@@ -419,7 +419,7 @@ static noinline void adjust_all_service_levels(void){
 	double QoSLowerIndex; 
 	double QoSUpperIndex; 
 	
-	int aConvertValue;
+	int aConvertValue, bConvertValue,cConvertValue;
 	double localTotalUtilization = 0;
 	double maxUtilization = num_online_cpus()-number_of_cpus_held_back;
 	//This is the max_level 
@@ -470,7 +470,7 @@ static noinline void adjust_all_service_levels(void){
 			}
 
 
-			while (innerIndex > 0 && ( valueDensityUpperIndex < valueDensityLowerIndex)){
+			while (innerIndex > 0 && ( valueDensityUpperIndex > valueDensityLowerIndex)){
 
 				temp = local_copy[upperIndex];
 				local_copy[upperIndex] = local_copy[lowerIndex];
@@ -502,7 +502,22 @@ static noinline void adjust_all_service_levels(void){
 				}
 			}
 		}
-	
+		//Let's validate sorted. 
+		//TODO: Remove this. 
+		for(lowerIndex =0; lowerIndex< currentNumberTasks;lowerIndex++){
+			QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
+			estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
+					(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
+			if (estWeightDiffLower <= 0 ) {
+				valueDensityLowerIndex = DBL_MAX;
+			} else {
+				valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
+			}
+
+			TRACE("Task %i, value Density %d, QoS Diff %d, weightDiff %d, valu\n", lowerIndex,(int)(valueDensityLowerIndex*1000), (int)(QoSLowerIndex*1000), (int)(estWeightDiffLower*1000));
+			
+					
+		}
 		//Local_copy is now sorted
 		
 		//Now need to maximize
