@@ -398,7 +398,7 @@ static void calculate_estimated_execution_cost(struct task_struct *t, double p, 
  
   
 //Should only be called by job_completion. Thus, caller holds adgnedf_lock
-static noinline void adjust_all_service_levels(void){
+static noinline void adjust_all_service_levels(int triggerNow){
 	int count;
 	struct task_struct *temp;
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
@@ -432,7 +432,7 @@ static noinline void adjust_all_service_levels(void){
 	taskSinceLastReweight++; //Keep track of the number of tasks that have occured since
 	//last rewieghting
 	
-	if( taskSinceLastReweight > 300 ) { //TODO: Pick a better number here
+	if( (triggerNow!=0) || (taskSinceLastReweight > 300) ) { //TODO: Pick a better number here
 		taskSinceLastReweight = 0;
 		//Copying array to local copy
 		for(count = 0;count < currentNumberTasks; count++) {
@@ -628,8 +628,12 @@ static noinline void adjust_all_service_levels(void){
 /* caller holds adgsnedf_lock */
 static noinline void job_completion(struct task_struct *t, int forced)
 {
+	//TODO: Change this if I want to trigger a weight change when we have fewer than 2 CPUS left
+	const int bufferCPUs = 2 ;
 	double old_est_weight;
 	double difference_in_weight;
+	int triggerNow = 0;
+	double maxUtilization;
 	BUG_ON(!t);
 
 	sched_trace_task_completion(t, forced);
@@ -662,7 +666,14 @@ static noinline void job_completion(struct task_struct *t, int forced)
 
 	agsnedf_total_utilization += difference_in_weight;
 	
-	adjust_all_service_levels();
+	triggerNow = 0;
+	
+	maxUtilization = num_online_cpus()-bufferCPUs;
+	TRACE("The utilization times 100 is %d\n", (int)(maxUtilization*100));
+	if( agsnedf_total_utilization > maxUtilization) {
+		triggerNow = 1;
+	}
+	adjust_all_service_levels(triggerNow);
 	
 	// **** TESTING ******
 	// AARON; Note, I want to make sure that the service level will get data sent back and forth
