@@ -403,7 +403,7 @@ static noinline void adjust_all_service_levels(int triggerNow){
 	struct task_struct *temp;
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
 	// This is how tsk_rt(t)->ctrl_page->service_level;
-	const int number_of_cpus_held_back = 2;
+	const int number_of_cpus_held_back = 5;
 	struct task_struct* local_copy[currentNumberTasks];
 	int taskLevel[currentNumberTasks];
 	double weightLevel[currentNumberTasks];
@@ -629,7 +629,7 @@ static noinline void adjust_all_service_levels(int triggerNow){
 static noinline void job_completion(struct task_struct *t, int forced)
 {
 	//TODO: Change this if I want to trigger a weight change when we have fewer than 2 CPUS left
-	const int bufferCPUs = 2 ;
+	const int bufferCPUs = 5;
 	double old_est_weight;
 	double difference_in_weight;
 	int triggerNow = 0;
@@ -669,8 +669,9 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	triggerNow = 0;
 	
 	maxUtilization = num_online_cpus()-bufferCPUs;
-	TRACE("The utilization times 100 is %d\n", (int)(maxUtilization*100));
+	TRACE("The utilization times 100 is %d\n", (int)(agsnedf_total_utilization*100));
 	if( agsnedf_total_utilization > maxUtilization) {
+		TRACE("TRIGGER");
 		triggerNow = 1;
 	}
 	adjust_all_service_levels(triggerNow);
