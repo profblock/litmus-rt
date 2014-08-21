@@ -136,6 +136,7 @@ static int currentNumberTasks;
 static double agsnedf_total_utilization;
 static int taskSinceLastReweight; //Keeps track of number of task completions since
 // last rewieght
+static int initialClearWindow; //Used to keep track of the initial window where nothing can change
 static int removeMeTaskCounter; //Temporary, for building. This is used
 //to keep track of the number of tasks that have enacted a reweighting event
 static int changeNow; //if 1, under utilized. if 0, nothing. -1 if over utilized
@@ -425,14 +426,22 @@ static noinline void adjust_all_service_levels(int triggerNow){
 	//This is the max_level 
 	const int max_level = 2; //max level should be 3, but crashing. So let's try 2
 	const int lowest_level = 0; //lowest service level level should be 3, but crashing. So let's try 2
-	
-	//
 	double calculationFactor;
+	int shouldReweightNow = 0;
 	
 	taskSinceLastReweight++; //Keep track of the number of tasks that have occured since
 	//last rewieghting
+	initialClearWindow++;
 	
-	if( (triggerNow!=0) || (taskSinceLastReweight > 300) ) { //TODO: Pick a better number here
+	//I want to separate the connection because I may  end up using different 
+	//options for reweighting. 
+	
+	//Improve the conditions here so it's time based not task release based. 
+	if( (initialClearWindow>300) && ((triggerNow!=0) || (taskSinceLastReweight > 300))){
+		shouldReweightNow = 1;
+	}
+	
+	if( shouldReweightNow==1 ) { 
 		taskSinceLastReweight = 0;
 		//Copying array to local copy
 		for(count = 0;count < currentNumberTasks; count++) {
@@ -634,6 +643,8 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	double difference_in_weight;
 	int triggerNow = 0;
 	double maxUtilization;
+	const double PERCENT_CHANGE_TRIGGER = 0.125; // If the task's weight changes by this percentage
+	// between job releases, then trigger an immediate reweighting
 	BUG_ON(!t);
 
 	sched_trace_task_completion(t, forced);
@@ -668,43 +679,22 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	
 	triggerNow = 0;
 	
+	
 	maxUtilization = num_online_cpus()-bufferCPUs;
 	TRACE("The utilization times 100 is %d\n", (int)(agsnedf_total_utilization*100));
 	if( agsnedf_total_utilization > maxUtilization) {
 		TRACE("TRIGGER");
 		triggerNow = 1;
 	}
+	
+	if( (get_estimated_weight(t) > old_est_weight*(1+PERCENT_CHANGE_TRIGGER)) ||
+		(get_estimated_weight(t) < old_est_weight*(1-PERCENT_CHANGE_TRIGGER)))
+	{
+		TRACE("Individual task trigger");
+		triggerNow = 1;
+	}
 	adjust_all_service_levels(triggerNow);
 	
-	// **** TESTING ******
-	// AARON; Note, I want to make sure that the service level will get data sent back and forth
-	//TRACE("TASK SERVICE LEVEL :%u\n",tsk_rt(t)->ctrl_page->service_level);
-	
-	//Constantly rotate between service levels
-/*	
-	if ( changeNow>0 ) {
-		if (tsk_rt(t)->ctrl_page->service_level < 2) {
-			tsk_rt(t)->ctrl_page->service_level+=1;
-			//Change period
-// 			tsk_rt(t)->task_params.period = tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].service_level_period;
-// 			tsk_rt(t)->task_params.relative_deadline = tsk_rt(t)->task_params.period;
-		}
-		removeMeTaskCounter++;
-	} else if ( changeNow < 0 ) {
-		if (tsk_rt(t)->ctrl_page->service_level > 0) {
-			tsk_rt(t)->ctrl_page->service_level -= 1;
-			//Change period
-// 			tsk_rt(t)->task_params.period = tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].service_level_period;
-// 			tsk_rt(t)->task_params.relative_deadline = tsk_rt(t)->task_params.period;
-		}
-		removeMeTaskCounter++;
-	} 
-	// there are 32 tasks, so, once all 32 have gone. No more changing
-	if (removeMeTaskCounter >=32) {
-		removeMeTaskCounter = 0;
-		changeNow = 0;
-	}
-*/
 	
 	//This line is also incorect. No idea why it would let me use it
 	//t->rt_param.job_params.current_service_level+=30;
@@ -1368,6 +1358,7 @@ static long adgsnedf_activate_plugin(void)
 	
 	agsnedf_total_utilization = 0;
 	taskSinceLastReweight = 0;
+	initialClearWindow = 0;
 	removeMeTaskCounter=0; //TODO: REMOVE Later
 	changeNow=0; 
 	currentNumberTasks = 0;
