@@ -134,11 +134,11 @@ static struct task_struct* all_tasks[100];
 static int currentNumberTasks;
 
 static double agsnedf_total_utilization;
-static int taskSinceLastReweight; //Keeps track of number of task completions since
-// last rewieght
-static int initialClearWindow; //Used to keep track of the initial window where nothing can change
-static int removeMeTaskCounter; //Temporary, for building. This is used
-//to keep track of the number of tasks that have enacted a reweighting event
+
+static const lt_t nanosecondsBetweenReweights = 1000000000/20; //Number of times per second that the system is weighted at a minimum;
+static lt_t lastReweightTime; //time used to keep track of the last time the task was reweighted
+static lt_t initialStartTime;//Time the first task starts
+static lt_t initialStableWindowTime=((lt_t)10)*((lt_t)1000000000); //For the first 30 seconds, nothing happens. 
 static int changeNow; //if 1, under utilized. if 0, nothing. -1 if over utilized
 
 
@@ -372,9 +372,12 @@ static void adgsnedf_release_jobs(rt_domain_t* rt, struct bheap* tasks)
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&adgsnedf_lock, flags);
-
+	
 	__merge_ready(rt, tasks);
 	check_for_preemptions();
+	
+
+	
 
 	raw_spin_unlock_irqrestore(&adgsnedf_lock, flags);
 }
@@ -404,7 +407,8 @@ static noinline void adjust_all_service_levels(int triggerNow){
 	struct task_struct *temp;
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
 	// This is how tsk_rt(t)->ctrl_page->service_level;
-	const int number_of_cpus_held_back = 5;
+	const int number_of_cpus_held_back = 5; //Note: On my 12 core (24 virtual processors)
+	//If this is under 5, then the system crashes. (Thus, the system runs on 19 virtual cores)
 	struct task_struct* local_copy[currentNumberTasks];
 	int taskLevel[currentNumberTasks];
 	double weightLevel[currentNumberTasks];
@@ -420,29 +424,16 @@ static noinline void adjust_all_service_levels(int triggerNow){
 	double QoSLowerIndex; 
 	double QoSUpperIndex; 
 	
-	int aConvertValue, bConvertValue,cConvertValue;
+	int aConvertValue;
 	double localTotalUtilization = 0;
 	double maxUtilization = num_online_cpus()-number_of_cpus_held_back;
 	//This is the max_level 
 	const int max_level = 2; //max level should be 3, but crashing. So let's try 2
 	const int lowest_level = 0; //lowest service level level should be 3, but crashing. So let's try 2
 	double calculationFactor;
-	int shouldReweightNow = 0;
-	
-	taskSinceLastReweight++; //Keep track of the number of tasks that have occured since
-	//last rewieghting
-	initialClearWindow++;
-	
-	//I want to separate the connection because I may  end up using different 
-	//options for reweighting. 
 	
 	//Improve the conditions here so it's time based not task release based. 
-	if( (initialClearWindow>300) && ((triggerNow!=0) || (taskSinceLastReweight > 300))){
-		shouldReweightNow = 1;
-	}
-	
-	if( shouldReweightNow==1 ) { 
-		taskSinceLastReweight = 0;
+	if( triggerNow!=0 ) { 
 		//Copying array to local copy
 		for(count = 0;count < currentNumberTasks; count++) {
 			local_copy[count] = all_tasks[count];
@@ -638,7 +629,8 @@ static noinline void adjust_all_service_levels(int triggerNow){
 static noinline void job_completion(struct task_struct *t, int forced)
 {
 	//TODO: Change this if I want to trigger a weight change when we have fewer than 2 CPUS left
-	const int bufferCPUs = 5;
+	const int bufferCPUs = 5; //Note: On my 12 core (24 virtual processors)
+	//If this is under 5, then the system crashes. (Thus, the system runs on 19 virtual cores)
 	double old_est_weight;
 	double difference_in_weight;
 	int triggerNow = 0;
@@ -677,22 +669,52 @@ static noinline void job_completion(struct task_struct *t, int forced)
 
 	agsnedf_total_utilization += difference_in_weight;
 	
+	
+	//When the jobs are released, then start the initiali timers;	
+	if(initialStartTime ==0){
+		initialStartTime = litmus_clock();
+		TRACE("Starting NOW %llu\n", initialStartTime);
+	}
+	if(lastReweightTime == 0){
+		lastReweightTime = litmus_clock();
+		TRACE("RewightingWindow now %llu\n", lastReweightTime);
+	}
+	
+	
 	triggerNow = 0;
 	
 	
 	maxUtilization = num_online_cpus()-bufferCPUs;
 	TRACE("The utilization times 100 is %d\n", (int)(agsnedf_total_utilization*100));
+	//Trigger because the system is too utilized
 	if( agsnedf_total_utilization > maxUtilization) {
-		TRACE("TRIGGER");
+		TRACE("TRIGGER\n");
 		triggerNow = 1;
 	}
 	
+	//trigger because a task changed its weight by too much
 	if( (get_estimated_weight(t) > old_est_weight*(1+PERCENT_CHANGE_TRIGGER)) ||
 		(get_estimated_weight(t) < old_est_weight*(1-PERCENT_CHANGE_TRIGGER)))
 	{
-		TRACE("Individual task trigger");
+		TRACE("Individual task trigger\n");
 		triggerNow = 1;
 	}
+	
+	//trigger because enough time has passed
+	if ( (lastReweightTime + nanosecondsBetweenReweights) < litmus_clock()){
+		triggerNow = 1;
+		lastReweightTime = litmus_clock();
+		TRACE("Reweighting NOW at %llu\n", lastReweightTime);
+	}
+
+	// if we aren't past the initial window, then don't reweight
+	if((initialStartTime+initialStableWindowTime) > litmus_clock()){
+		if(triggerNow==1){
+			TRACE("Still to early. Nothing until %llu, now %llu\n", initialStartTime+initialStableWindowTime, litmus_clock());
+		}
+		triggerNow = 0;
+	}
+	
 	adjust_all_service_levels(triggerNow);
 	
 	
@@ -1357,9 +1379,8 @@ static long adgsnedf_activate_plugin(void)
 	cpu_entry_t *entry;
 	
 	agsnedf_total_utilization = 0;
-	taskSinceLastReweight = 0;
-	initialClearWindow = 0;
-	removeMeTaskCounter=0; //TODO: REMOVE Later
+	lastReweightTime=0;
+	initialStartTime=0;
 	changeNow=0; 
 	currentNumberTasks = 0;
 
