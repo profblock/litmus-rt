@@ -45,7 +45,7 @@ static inline void setup_release(struct task_struct *t, lt_t release)
 		//tsk_rt(t)->ctrl_page->service_level = get_current_survice_level(t);
 		TRACE("Setup_release 3 : %d\n", tsk_rt(t)->ctrl_page->service_level);
 	} else {
-		TRACE("Womp Womp\n");
+		TRACE("No service levels defined\n");
 	}
 	TRACE("Setup_release 4 : %d\n", tsk_rt(t)->ctrl_page->service_level);
 	t->rt_param.job_params.deadline = release + get_rt_relative_deadline(t);
