@@ -56,7 +56,7 @@
  * group CPUs into clusters.  GLOBAL_CLUSTER, which is the default, means that
  * all CPUs form a single cluster (just like GSN-EDF).
  */
-static enum cache_level cluster_config = GLOBAL_CLUSTER;
+static enum cache_level cluster_config = L3_CLUSTER;
 
 struct clusterdomain;
 

@@ -1093,6 +1093,8 @@ static long acedf_activate_plugin(void)
 {
 	int i, j, cpu, ccpu, cpu_count;
 	cpu_entry_t *entry;
+	int chk = 0;
+
 
 
 	//added 
@@ -1103,7 +1105,6 @@ static long acedf_activate_plugin(void)
 	currentNumberTasks_acedf = 0;
 	
 	cpumask_var_t mask;
-	int chk = 0;
 
 	/* de-allocate old clusters, if any */
 	cleanup_acedf();
