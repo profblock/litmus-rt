@@ -92,6 +92,8 @@ DEFINE_PER_CPU(cpu_entry_t, acedf_cpu_entries);
  * total cpu number and the cluster size
  */
 typedef struct clusterdomain {
+	int clusterID;
+
 	/* rt_domain for this cluster */
 	rt_domain_t	domain;
 	/* cpus in this cluster */
@@ -268,8 +270,21 @@ static void preempt(cpu_entry_t *entry)
  *           Caller must hold acedf_lock.
  */
 static noinline void requeue(struct task_struct* task)
-{
-	acedf_domain_t *cluster = task_cpu_cluster(task);
+{ 
+	acedf_domain_t *cluster;
+	acedf_domain_t *oldcluster = task_cpu_cluster(task);
+	
+	
+	//TODO: remove this code, it's here for an experiment
+	TRACE("ACEDF**&&**: Task , %d, Intially on %d\n", task->pid, task_cpu_cluster(task)->clusterID);
+	if (oldcluster->clusterID==0){
+		task->rt_param.task_params.cpu = 1;
+	} else {
+		task->rt_param.task_params.cpu = 0;
+	}
+	cluster = task_cpu_cluster(task);
+	
+	TRACE("ACEDF**&&**: Task , %d, Now on on %d\n", task->pid, task_cpu_cluster(task)->clusterID);
 	BUG_ON(!task);
 	/* sanity check before insertion */
 	BUG_ON(is_queued(task));
@@ -639,6 +654,7 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	sched_trace_task_completion(t, forced);
 
 	TRACE_TASK(t, "job_completion().\n");
+	TRACE("ACEDF: Task , %d, complete on %d\n", t->pid, task_cpu_cluster(t)->clusterID);
 
 	/* set flags */
 	tsk_rt(t)->completed = 0;
@@ -732,7 +748,66 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	 * But don't requeue a blocking task. */
 	if (is_running(t))
 		acedf_job_arrival(t);
+	TRACE("ACEDF**&&**: Task , %d, complete on %d\n", t->pid, task_cpu_cluster(t)->clusterID);
 }
+
+
+//TODO: *****
+//TODO: This needs to be changed from moving a task from one partition to another
+//To one cluster from another. 
+//TODO*****
+/* called with preemptions disabled */
+// static void acedf_migrate_to(struct task_struct* task_to_migrate, acedf_domain_t* target_cluster)
+// {
+// 	struct task_struct* t = task_to_migrate;
+// 	acedf_domain_t* from;
+// 
+// 	if (task_cpu_cluster(t) == target_cluster)
+// 		return;
+// 
+// 	/* make sure target_cpu makes sense */
+// 	//Makes no sense in current context
+// 	//BUG_ON(!cpu_online(target_cpu));
+// 
+// 	local_irq_disable();
+// 
+// 	from = get_partition(t);
+// 	raw_spin_lock(&from->cluster_lock);
+// 
+// 	/* Scheduled task should not be in any ready or release queue.  Check
+// 	 * this while holding the lock to avoid RT mode transitions.*/
+// 	BUG_ON(is_realtime(t) && is_queued(t));
+// 
+// 	/* switch partitions */
+// 	
+// 	//Step 1 remove the task from it's original target cluster
+// 	tsk_rt(t)->task_params.cpu = target_cpu;
+// 	
+// 	//Step 2 add the task to it's new target cluster
+// 
+// 	raw_spin_unlock(&from->cluster_lock);
+// 
+// 	/* Don't trace scheduler costs as part of
+// 	 * locking overhead. Scheduling costs are accounted for
+// 	 * explicitly. */
+// 	TS_LOCK_SUSPEND;
+// 
+// 	local_irq_enable();
+// 	preempt_enable_no_resched();
+// 
+// 	/* deschedule to be migrated */
+// 	schedule();
+// 
+// 	/* we are now on the target processor */
+// 	preempt_disable();
+// 
+// 	/* start recording costs again */
+// 	TS_LOCK_RESUME;
+//  
+// 	//Commented out because it makes no sense in current context
+// 	//BUG_ON(smp_processor_id() != target_cpu && is_realtime(t));
+// }
+
 
 /* Getting schedule() right is a bit tricky. schedule() may not make any
  * assumptions on the state of the current task since it may be called for a
@@ -894,10 +969,12 @@ static void acedf_task_new(struct task_struct * t, int on_rq, int is_scheduled)
 	acedf_domain_t*		cluster;
 	int localNumber; 
 
-	TRACE("gsn edf: task new %d\n", t->pid);
+	TRACE("acedf edf: task new %d\n", t->pid);
 
 	/* the cluster doesn't change even if t is scheduled */
 	cluster = task_cpu_cluster(t);
+	
+	TRACE("ACEDF: Task , %d, is initially assigned to %d\n", t->pid, cluster->clusterID);
 
 	raw_spin_lock_irqsave(&cluster->cluster_lock, flags);
 
@@ -919,8 +996,13 @@ static void acedf_task_new(struct task_struct * t, int on_rq, int is_scheduled)
 		BUG_ON(entry->scheduled);
 
 #ifdef CONFIG_RELEASE_MASTER
+		//TODO: Remove the following line, I'm putting fo clarity
+		TRACE("Yup: Release master configured\n");
 		if (entry->cpu != cluster->domain.release_master) {
 #endif
+			//TODO: Remove the following line, I'm putting fo clarity
+			TRACE("Nope: release master unconfugred\n");
+			
 			entry->scheduled = t;
 			tsk_rt(t)->scheduled_on = task_cpu(t);
 #ifdef CONFIG_RELEASE_MASTER
@@ -1098,13 +1180,14 @@ static long acedf_activate_plugin(void)
 
 
 	//added 
+	cpumask_var_t mask;
 	agsnedf_total_utilization_acedf = 0;
 	lastReweightTime_acedf=0;
 	initialStartTime_acedf=0;
 	changeNow_acedf=0; 
 	currentNumberTasks_acedf = 0;
 	
-	cpumask_var_t mask;
+	
 
 	/* de-allocate old clusters, if any */
 	cleanup_acedf();
@@ -1147,7 +1230,9 @@ static long acedf_activate_plugin(void)
 	/* initialize clusters */
 	acedf = kmalloc(num_clusters * sizeof(acedf_domain_t), GFP_ATOMIC);
 	for (i = 0; i < num_clusters; i++) {
-
+		
+		acedf[i].clusterID = i;
+		
 		acedf[i].cpus = kmalloc(cluster_size * sizeof(cpu_entry_t),
 				GFP_ATOMIC);
 		acedf[i].heap_node = kmalloc(
