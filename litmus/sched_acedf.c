@@ -93,6 +93,7 @@ DEFINE_PER_CPU(cpu_entry_t, acedf_cpu_entries);
  */
 typedef struct clusterdomain {
 	int clusterID;
+	int representative_CPU;
 
 	/* rt_domain for this cluster */
 	rt_domain_t	domain;
@@ -272,19 +273,20 @@ static void preempt(cpu_entry_t *entry)
 static noinline void requeue(struct task_struct* task)
 { 
 	acedf_domain_t *cluster;
-	acedf_domain_t *oldcluster = task_cpu_cluster(task);
+	//acedf_domain_t *oldcluster = task_cpu_cluster(task);
 	
 	
+	///****** ADD CHECK HERE FOR VALIDATING acedf[i].representativeID
 	//TODO: remove this code, it's here for an experiment
-	TRACE("ACEDF**&&**: Task , %d, Intially on %d\n", task->pid, task_cpu_cluster(task)->clusterID);
-	if (oldcluster->clusterID==0){
-		task->rt_param.task_params.cpu = 1;
-	} else {
-		task->rt_param.task_params.cpu = 0;
-	}
-	cluster = task_cpu_cluster(task);
-	
-	TRACE("ACEDF**&&**: Task , %d, Now on on %d\n", task->pid, task_cpu_cluster(task)->clusterID);
+// 	TRACE("ACEDF**&&**: Task , %d, Intially on %d\n", task->pid, task_cpu_cluster(task)->clusterID);
+// 	if (oldcluster->clusterID==0){
+// 		task->rt_param.task_params.cpu = cluster;
+// 	} else {
+// 		task->rt_param.task_params.cpu = 0;
+// 	}
+// 	cluster = task_cpu_cluster(task);
+// 	
+// 	TRACE("ACEDF**&&**: Task , %d, Now on on %d\n", task->pid, task_cpu_cluster(task)->clusterID);
 	BUG_ON(!task);
 	/* sanity check before insertion */
 	BUG_ON(is_queued(task));
@@ -771,19 +773,19 @@ static noinline void job_completion(struct task_struct *t, int forced)
 // 
 // 	local_irq_disable();
 // 
-// 	from = get_partition(t);
+// 	from = task_cpu_cluster(t);
 // 	raw_spin_lock(&from->cluster_lock);
 // 
 // 	/* Scheduled task should not be in any ready or release queue.  Check
 // 	 * this while holding the lock to avoid RT mode transitions.*/
 // 	BUG_ON(is_realtime(t) && is_queued(t));
 // 
-// 	/* switch partitions */
+// 	/* switch clusters */
 // 	
-// 	//Step 1 remove the task from it's original target cluster
-// 	tsk_rt(t)->task_params.cpu = target_cpu;
+// 	//to move a task from one cluster to anthother. If it is not queued, then all you
+// 	//need to do is change its CPU from one in a cluster into another in a different one
+// 	tsk_rt(t)->task_params.cpu = target_cluster->representative_CPU;
 // 	
-// 	//Step 2 add the task to it's new target cluster
 // 
 // 	raw_spin_unlock(&from->cluster_lock);
 // 
@@ -807,6 +809,7 @@ static noinline void job_completion(struct task_struct *t, int forced)
 // 	//Commented out because it makes no sense in current context
 // 	//BUG_ON(smp_processor_id() != target_cpu && is_realtime(t));
 // }
+
 
 
 /* Getting schedule() right is a bit tricky. schedule() may not make any
@@ -1232,6 +1235,7 @@ static long acedf_activate_plugin(void)
 	for (i = 0; i < num_clusters; i++) {
 		
 		acedf[i].clusterID = i;
+		acedf[i].representative_CPU = -1;
 		
 		acedf[i].cpus = kmalloc(cluster_size * sizeof(cpu_entry_t),
 				GFP_ATOMIC);
@@ -1272,6 +1276,17 @@ static long acedf_activate_plugin(void)
 #ifdef VERBOSE_INIT
 			print_cluster_topology(mask, cpu);
 #endif
+			//TODO: Validate 
+			if ( acedf[i].representative_CPU == -1 ) {
+				//acedf[i].representative_CPU = cpu;
+				TRACE("Setting cluster number %d to %d\n", i,cpu);			
+			} else {
+				TRACE("Cluster number %d already set to %d\n", i,acedf[i].representative_CPU);			
+			}
+			acedf[i].representative_CPU = cpu;
+			
+			
+			
 			/* add cpus to current cluster and init cpu_entry_t */
 			cpu_count = 0;
 			for_each_cpu(ccpu, acedf[i].cpu_map) {
