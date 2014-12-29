@@ -284,9 +284,9 @@ static noinline void requeue(struct task_struct* task)
 // 	} else {
 // 		task->rt_param.task_params.cpu = 0;
 // 	}
-// 	cluster = task_cpu_cluster(task);
+ 	cluster = task_cpu_cluster(task);
 // 	
-// 	TRACE("ACEDF**&&**: Task , %d, Now on on %d\n", task->pid, task_cpu_cluster(task)->clusterID);
+ 	TRACE("ACEDF**&&**: Task , %d, Now on on %d\n", task->pid, task_cpu_cluster(task)->clusterID);
 	BUG_ON(!task);
 	/* sanity check before insertion */
 	BUG_ON(is_queued(task));
@@ -1235,7 +1235,7 @@ static long acedf_activate_plugin(void)
 	for (i = 0; i < num_clusters; i++) {
 		
 		acedf[i].clusterID = i;
-		acedf[i].representative_CPU = -1;
+		//acedf[i].representative_CPU = -1;
 		
 		acedf[i].cpus = kmalloc(cluster_size * sizeof(cpu_entry_t),
 				GFP_ATOMIC);
@@ -1266,7 +1266,7 @@ static long acedf_activate_plugin(void)
 				continue;
 
 			/* this cpu isn't in any cluster */
-			/* get the shared cpus */
+			/* get the shared cpus */ 
 			if (unlikely(cluster_config == GLOBAL_CLUSTER))
 				cpumask_copy(mask, cpu_online_mask);
 			else
@@ -1277,13 +1277,13 @@ static long acedf_activate_plugin(void)
 			print_cluster_topology(mask, cpu);
 #endif
 			//TODO: Validate 
-			if ( acedf[i].representative_CPU == -1 ) {
-				//acedf[i].representative_CPU = cpu;
-				TRACE("Setting cluster number %d to %d\n", i,cpu);			
-			} else {
-				TRACE("Cluster number %d already set to %d\n", i,acedf[i].representative_CPU);			
-			}
-			acedf[i].representative_CPU = cpu;
+		// 	if ( acedf[i].representative_CPU == -1 ) {
+// 				//acedf[i].representative_CPU = cpu;
+// 				TRACE("Setting cluster number %d to %d\n", i,cpu);			
+// 			} else {
+// 				TRACE("Cluster number %d already set to %d\n", i,acedf[i].representative_CPU);			
+// 			}
+// 			acedf[i].representative_CPU = cpu;
 			
 			
 			
