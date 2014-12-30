@@ -1235,7 +1235,7 @@ static long acedf_activate_plugin(void)
 	for (i = 0; i < num_clusters; i++) {
 		
 		acedf[i].clusterID = i;
-		//acedf[i].representative_CPU = -1;
+		acedf[i].representative_CPU = -1;
 		
 		acedf[i].cpus = kmalloc(cluster_size * sizeof(cpu_entry_t),
 				GFP_ATOMIC);
@@ -1250,7 +1250,7 @@ static long acedf_activate_plugin(void)
 #ifdef CONFIG_RELEASE_MASTER
 		acedf[i].domain.release_master = atomic_read(&release_master_cpu);
 #endif
-	}
+	} 
 
 	/* cycle through cluster and add cpus to them */
 	for (i = 0; i < num_clusters; i++) {
@@ -1277,13 +1277,13 @@ static long acedf_activate_plugin(void)
 			print_cluster_topology(mask, cpu);
 #endif
 			//TODO: Validate 
-		// 	if ( acedf[i].representative_CPU == -1 ) {
-// 				//acedf[i].representative_CPU = cpu;
-// 				TRACE("Setting cluster number %d to %d\n", i,cpu);			
-// 			} else {
-// 				TRACE("Cluster number %d already set to %d\n", i,acedf[i].representative_CPU);			
-// 			}
-// 			acedf[i].representative_CPU = cpu;
+		 	if ( acedf[i].representative_CPU == -1 ) {
+				//acedf[i].representative_CPU = cpu;
+				TRACE("Setting cluster number %d to %d\n", i,cpu);			
+			} else {
+				TRACE("Cluster number %d already set to %d\n", i,acedf[i].representative_CPU);			
+			}
+			acedf[i].representative_CPU = cpu;
 			
 			
 			
