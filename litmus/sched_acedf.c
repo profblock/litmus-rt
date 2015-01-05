@@ -119,9 +119,9 @@ acedf_domain_t *acedf;
 
 /* Uncomment WANT_ALL_SCHED_EVENTS if you want to see all scheduling
  * decisions in the TRACE() log; uncomment VERBOSE_INIT for verbose
- * information during the initialization of the plugin (e.g., topology)
+ * information during the initialization of the plugin (e.g., topology) */
 #define WANT_ALL_SCHED_EVENTS
- */
+
 #define VERBOSE_INIT
 
 //TODO-AARON: The number here limits the number of real time threads. 
@@ -276,28 +276,21 @@ static void preempt(cpu_entry_t *entry)
 static noinline void requeue(struct task_struct* task)
 { 
 	acedf_domain_t *cluster;
-	//acedf_domain_t *oldcluster = task_cpu_cluster(task);
-	
-	
-	///****** ADD CHECK HERE FOR VALIDATING acedf[i].representativeID
-	//TODO: remove this code, it's here for an experiment
-// 	TRACE("ACEDF**&&**: Task , %d, Intially on %d\n", task->pid, task_cpu_cluster(task)->clusterID);
-// 	if (oldcluster->clusterID==0){
-// 		task->rt_param.task_params.cpu = cluster;
-// 	} else {
-// 		task->rt_param.task_params.cpu = 0;
-// 	}
  	cluster = task_cpu_cluster(task);
-// 	
+
  	TRACE("ACEDF**&&**: Task , %d, Now on on %d\n", task->pid, task_cpu_cluster(task)->clusterID);
 	BUG_ON(!task);
 	/* sanity check before insertion */
 	BUG_ON(is_queued(task));
 
 	if (is_early_releasing(task) || is_released(task, litmus_clock()))
+	{
+		TRACE("ACEDF**&&**: Early Releasing or released already, Task , %d, Now on on %d\n", task->pid, task_cpu_cluster(task)->clusterID);
 		__add_ready(&cluster->domain, task);
+	}
 	else {
 		/* it has got to wait */
+		TRACE("ACEDF**&&**: Task , %d, gotta wait on on %d\n", task->pid, task_cpu_cluster(task)->clusterID);
 		add_release(&cluster->domain, task);
 	}
 }
@@ -308,6 +301,7 @@ static cpu_entry_t* acedf_get_nearest_available_cpu(
 {
 	cpu_entry_t *affinity;
 
+	TRACE("CONFIG_SCHED_CPU_AFFINITY is turned on\n");
 	get_nearest_available_cpu(affinity, start, acedf_cpu_entries,
 #ifdef CONFIG_RELEASE_MASTER
 		cluster->domain.release_master
@@ -334,12 +328,14 @@ static void check_for_preemptions(acedf_domain_t *cluster)
 #ifdef CONFIG_PREFER_LOCAL_LINKING
 	cpu_entry_t *local;
 
+	TRACE("LOCAL LINKING IS TURNED ON\n");
 	/* Before linking to other CPUs, check first whether the local CPU is
 	 * idle. */
 	local = &__get_cpu_var(acedf_cpu_entries);
 	task  = __peek_ready(&cluster->domain);
 
 	if (task && !local->linked
+		&& task-> rt_param.task_params.cpu == local->cluster->representative_CPU
 #ifdef CONFIG_RELEASE_MASTER
 	    && likely(local->cpu != cluster->domain.release_master)
 #endif
@@ -348,7 +344,10 @@ static void check_for_preemptions(acedf_domain_t *cluster)
 		TRACE_TASK(task, "linking to local CPU %d to avoid IPI\n", local->cpu);
 		link_task_to_cpu(task, local);
 		preempt(local);
+	} else if (task && !local->linked && task-> rt_param.task_params.cpu != local->cluster->representative_CPU ) { /* TODO: Erase the else if, this is just for testing purposes */
+		TRACE_TASK(task, "is on a different cluster, so, we're not linking to  %d\ n", local->cpu);
 	}
+	
 #endif
 
 
@@ -670,10 +669,10 @@ static void acedf_migrate_to(struct task_struct* task_to_migrate, int target_clu
  	acedf_domain_t *oldcluster = task_cpu_cluster(task_to_migrate);
 	
 	/* Acquire the global lock first so that we don't cause deadlock */ 
-	raw_spin_lock_irqsave(&global_lock, flags);
-	TRACE("acquire GLOBAL lock:migrate \n");
+	//raw_spin_lock_irqsave(&global_lock, flags);
+	//TRACE("acquire GLOBAL lock:migrate \n");
 	//raw_spin_lock(&(acedf[target_cluster_id].cluster_lock)); 
-	TRACE("FAKE ACQUIRE %d lock:Schedule \n",acedf[target_cluster_id].clusterID );
+	//TRACE("FAKE ACQUIRE %d lock:Schedule \n",acedf[target_cluster_id].clusterID );
 	
 	
 	TRACE("ACEDF**&&**: Task , %d, Intially on %d\n", task_to_migrate->pid, task_cpu_cluster(task_to_migrate)->clusterID);
@@ -684,10 +683,10 @@ static void acedf_migrate_to(struct task_struct* task_to_migrate, int target_clu
 // 		task_to_migrate->rt_param.task_params.cpu = acedf[0].representative_CPU;
 // 	}
 
-	TRACE("FAKEReleasing %d lock:Schedule \n",acedf[target_cluster_id].clusterID );
+	//TRACE("FAKEReleasing %d lock:Schedule \n",acedf[target_cluster_id].clusterID );
 	///raw_spin_unlock(&(acedf[target_cluster_id].cluster_lock));
-	TRACE("RElease GLOBAL lock:migrate \n");
-	raw_spin_unlock_irqrestore(&global_lock, flags);
+	//TRACE("RElease GLOBAL lock:migrate \n");
+	//raw_spin_unlock_irqrestore(&global_lock, flags);
 }
 
 /* Junk to be deleted */
@@ -863,7 +862,6 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	
 		//TODO: change this to move to the ACTUAL new location
 		oldcluster = task_cpu_cluster(t);
-		TRACE("Acqured Global Lock\n");
 		if (oldcluster->clusterID==0){
 			TRACE("ACEDF**FFFF**: Task , %d, is on 0, changing  to 1\n", t->pid);
 			acedf_migrate_to(t, 1);
@@ -871,11 +869,10 @@ static noinline void job_completion(struct task_struct *t, int forced)
 		TRACE("ACEDF**FFFF**: Task , %d, is on 1, changing  to 0\n", t->pid);
 			acedf_migrate_to(t, 0);
 		}
-		TRACE("Global Lock released\n"); 
 	
 		acedf_job_arrival(t);
 	}
-	TRACE("ACEDF**&&**: Task , %d, complete on %d\n", t->pid, task_cpu_cluster(t)->clusterID);
+	TRACE("ACEDF:Complete: Task , %d, now on C%d\n", t->pid, task_cpu_cluster(t)->clusterID);
 }
 
 
@@ -1030,32 +1027,36 @@ static struct task_struct* acedf_schedule(struct task_struct * prev)
 static void acedf_finish_switch(struct task_struct *prev)
 {
 /* TODO: Insert code here to move task to new processor */
-	int current_processor = smp_processor_id();
-	acedf_domain_t * cluster_for_current_proc = remote_cluster(current_processor);
-	int cluster_rep_cpu = cluster_for_current_proc->representative_CPU;
-
-	//check to make sure that current task has changed CPUs
-	if (is_realtime(prev) &&
-	    is_running(prev) &&
-	    prev->rt_param.task_params.cpu != cluster_rep_cpu) {
-		TRACE_TASK(prev, "needs to migrate from C%d to C%d\n",
-			   cluster_rep_cpu, prev->rt_param.task_params.cpu);
-
-/*		to = task_pfp(prev);
-
-		raw_spin_lock(&to->slock);
-
-		TRACE_TASK(prev, "adding to queue on P%d\n", to->cpu);
-		requeue(prev, to);
-		if (fp_preemption_needed(&to->ready_queue, to->scheduled))
-			preempt(to);
-
-		raw_spin_unlock(&to->slock);
-		*/
-	} else {
-		TRACE_TASK(prev, "is on both C%d and C%d\n",
-			   cluster_rep_cpu, prev->rt_param.task_params.cpu);
-	}
+/* TODO: DELETE CODE */
+// 	int current_processor;
+// 	acedf_domain_t * to;
+// 	acedf_domain_t * cluster_for_current_proc;
+// 	int cluster_rep_cpu;
+// 
+// 	//check to make sure that current task has changed CPUs
+// 	if (is_realtime(prev) &&
+// 	    is_running(prev)) {
+// 	    	current_processor = smp_processor_id();
+// 			cluster_for_current_proc = remote_cluster(current_processor);
+// 			cluster_rep_cpu = cluster_for_current_proc->representative_CPU;
+// 			
+// 
+// 			if(prev->rt_param.task_params.cpu != cluster_rep_cpu) {
+// 				TRACE_TASK(prev, "needs to migrate from C%d to C%d\n",
+// 					   cluster_rep_cpu, prev->rt_param.task_params.cpu);
+// 				to = task_cpu_cluster(prev);
+// 				
+// 				//raw_spin_lock(&to->cluster_lock);
+// 				// Migrate the task from one processor to the other now!
+// 				//TRACE_TASK(prev, "MOVING from C%d to C%d\n",
+// 				//	   cluster_rep_cpu, prev->rt_param.task_params.cpu);
+// 				
+// 				//raw_spin_unlock(&to->cluster_lock);
+// 			} else {
+// 				TRACE_TASK(prev, "is on both C%d and C%d\n",
+// 			   		cluster_rep_cpu, prev->rt_param.task_params.cpu);
+// 			}
+// 	} 
 
 
 
