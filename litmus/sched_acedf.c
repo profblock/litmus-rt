@@ -135,6 +135,10 @@ static struct task_struct* all_tasks_acedf[100];
 static int currentNumberTasks_acedf;
 
 static double agsnedf_total_utilization_acedf;
+//TODO-AARON: This only works with 100 clusters. 
+static double acedf_cluster_total_utilization[100]; 
+static int acedf_number_of_clusters;
+static double acedf_cluster_max_utilization = 0.9; //I'm just setting this to 90% for now
 
 static const lt_t nanosecondsBetweenReweights_acedf = 1000000000/20; //Number of times per second that the system is weighted at a minimum;
 static lt_t lastReweightTime_acedf; //time used to keep track of the last time the task was reweighted
@@ -747,6 +751,8 @@ static void acedf_migrate_to(struct task_struct* task_to_migrate, int target_clu
 static noinline void job_completion(struct task_struct *t, int forced)
 {
 
+	int i;
+	int cluster_id;
 	//Remove in the future!
 	acedf_domain_t *oldcluster;
 
@@ -767,7 +773,8 @@ static noinline void job_completion(struct task_struct *t, int forced)
 
 	TRACE_TASK(t, "job_completion().\n");
 	TRACE("ACEDF: Task , %d, complete on %d\n", t->pid, task_cpu_cluster(t)->clusterID);
-
+	cluster_id = task_cpu_cluster(t)->clusterID;
+	
 	/* set flags */
 	tsk_rt(t)->completed = 0;
 	
@@ -795,7 +802,8 @@ static noinline void job_completion(struct task_struct *t, int forced)
 
 	agsnedf_total_utilization_acedf += difference_in_weight;
 	
-	
+	acedf_cluster_total_utilization[cluster_id] += difference_in_weight;
+		
 	//When the jobs are released, then start the initiali timers;	
 	if(initialStartTime_acedf ==0){
 		initialStartTime_acedf = litmus_clock();
@@ -817,6 +825,15 @@ static noinline void job_completion(struct task_struct *t, int forced)
 		TRACE("TRIGGER\n");
 		triggerNow = 1;
 	}
+	
+	
+	for(i =0; i< acedf_number_of_clusters; i++ ){
+		if (acedf_cluster_total_utilization[i] > acedf_cluster_max_utilization) {
+			TRACE("A processor is over utilized\n");
+			triggerNow = 1;
+		}
+	}
+	
 	
 	//trigger because a task changed its weight by too much
 	if( (get_estimated_weight(t) > old_est_weight*(1+PERCENT_CHANGE_TRIGGER)) ||
@@ -861,14 +878,17 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	if (is_running(t)) {
 	
 		//TODO: change this to move to the ACTUAL new location
-		oldcluster = task_cpu_cluster(t);
+		/* **************** GOOD EXAMPLE ******************** */
+		/* The following code is great example of how to change between clusters
+		   Keep it around until I establish a reweighting protocol */
+/*		oldcluster = task_cpu_cluster(t);
 		if (oldcluster->clusterID==0){
 			TRACE("ACEDF**FFFF**: Task , %d, is on 0, changing  to 1\n", t->pid);
 			acedf_migrate_to(t, 1);
 		} else {
 		TRACE("ACEDF**FFFF**: Task , %d, is on 1, changing  to 0\n", t->pid);
 			acedf_migrate_to(t, 0);
-		}
+		}*/
 	
 		acedf_job_arrival(t);
 	}
@@ -1298,11 +1318,16 @@ static long acedf_activate_plugin(void)
 
 	//added 
 	cpumask_var_t mask;
-	agsnedf_total_utilization_acedf = 0;
+	
 	lastReweightTime_acedf=0;
 	initialStartTime_acedf=0;
 	changeNow_acedf=0; 
 	currentNumberTasks_acedf = 0;
+	
+	agsnedf_total_utilization_acedf = 0;
+	for(i =0; i< 100; i++ ){
+		acedf_cluster_total_utilization[i]=0;
+	}
 	
 	
 
@@ -1345,6 +1370,7 @@ static long acedf_activate_plugin(void)
 	}
 
 	num_clusters = num_online_cpus() / cluster_size;
+	acedf_number_of_clusters = num_clusters;
 	printk(KERN_INFO "C-EDF: %d cluster(s) of size = %d\n",
 			num_clusters, cluster_size);
 
@@ -1369,6 +1395,8 @@ static long acedf_activate_plugin(void)
 		acedf[i].domain.release_master = atomic_read(&release_master_cpu);
 #endif
 	} 
+
+
 
 	/* cycle through cluster and add cpus to them */
 	for (i = 0; i < num_clusters; i++) {
