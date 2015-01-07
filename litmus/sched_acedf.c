@@ -664,6 +664,8 @@ static noinline void adjust_all_service_levels_acedf(int triggerNow){
 
 
 */
+
+
 static void acedf_migrate_to(struct task_struct* task_to_migrate, int target_cluster_id)
 {
 // 	struct task_struct* t = task_to_migrate;
@@ -671,26 +673,33 @@ static void acedf_migrate_to(struct task_struct* task_to_migrate, int target_clu
 // 	acedf_domain_t* target_cluster = &(acedf[target_cluster_id]);
 	unsigned long flags;
  	acedf_domain_t *oldcluster = task_cpu_cluster(task_to_migrate);
+ 	int oldClusterID  = oldcluster-> clusterID;
 	
 	/* Acquire the global lock first so that we don't cause deadlock */ 
-	//raw_spin_lock_irqsave(&global_lock, flags);
-	//TRACE("acquire GLOBAL lock:migrate \n");
-	//raw_spin_lock(&(acedf[target_cluster_id].cluster_lock)); 
-	//TRACE("FAKE ACQUIRE %d lock:Schedule \n",acedf[target_cluster_id].clusterID );
+	raw_spin_lock_irqsave(&global_lock, flags);
+	TRACE("acquire GLOBAL lock:migrate \n");
+	raw_spin_lock(&(acedf[target_cluster_id].cluster_lock)); 
+	TRACE("FAKE ACQUIRE %d lock:Schedule \n",acedf[target_cluster_id].clusterID );
 	
 	
 	TRACE("ACEDF**&&**: Task , %d, Intially on %d\n", task_to_migrate->pid, task_cpu_cluster(task_to_migrate)->clusterID);
 	task_to_migrate->rt_param.task_params.cpu = acedf[target_cluster_id].representative_CPU;
+	
+	//could cause synchronization issue. 
+	acedf_cluster_total_utilization[target_cluster_id] += get_estimated_weight(task_to_migrate);
+	acedf_cluster_total_utilization[oldClusterID] -= get_estimated_weight(task_to_migrate);
+	
+
 // 	if (oldcluster->clusterID==0){
 // 		task_to_migrate->rt_param.task_params.cpu = acedf[1].representative_CPU;
 // 	} else {
 // 		task_to_migrate->rt_param.task_params.cpu = acedf[0].representative_CPU;
 // 	}
 
-	//TRACE("FAKEReleasing %d lock:Schedule \n",acedf[target_cluster_id].clusterID );
-	///raw_spin_unlock(&(acedf[target_cluster_id].cluster_lock));
-	//TRACE("RElease GLOBAL lock:migrate \n");
-	//raw_spin_unlock_irqrestore(&global_lock, flags);
+	TRACE("FAKEReleasing %d lock:Schedule \n",acedf[target_cluster_id].clusterID );
+	raw_spin_unlock(&(acedf[target_cluster_id].cluster_lock));
+	TRACE("RElease GLOBAL lock:migrate \n");
+	raw_spin_unlock_irqrestore(&global_lock, flags);
 }
 
 /* Junk to be deleted */
