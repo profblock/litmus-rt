@@ -68,6 +68,7 @@ void litmus_do_exit(struct task_struct *tsk);
 #define get_rt_relative_deadline(t)	(tsk_rt(t)->task_params.relative_deadline)
 #define get_rt_phase(t)		(tsk_rt(t)->task_params.phase)
 #define get_partition(t) 	(tsk_rt(t)->task_params.cpu)
+#define get_target_cpu(t) 	(tsk_rt(t)->task_params.target_cpu)
 #define get_priority(t) 	(tsk_rt(t)->task_params.priority)
 #define get_class(t)        (tsk_rt(t)->task_params.cls)
 #define get_release_policy(t) (tsk_rt(t)->task_params.release_policy)

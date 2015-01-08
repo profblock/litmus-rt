@@ -105,7 +105,9 @@ struct rt_task {
 	budget_policy_t  budget_policy;  /* ignored by pfair */
 	release_policy_t release_policy;
 	
-		
+	/* CPU task will migrate to */
+	unsigned int	target_cpu;	
+	
 	/* adaptive tasks may have multiple service levels */	
 	struct rt_service_level* service_levels;
  
