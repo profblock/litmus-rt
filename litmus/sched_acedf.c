@@ -402,14 +402,18 @@ static void acedf_release_jobs(rt_domain_t* rt, struct bheap* tasks)
 {
 	acedf_domain_t* cluster = container_of(rt, acedf_domain_t, domain);
 	unsigned long flags;
+	unsigned long flags_secondary;
 
 	raw_spin_lock_irqsave(&cluster->cluster_lock, flags);
+	raw_spin_lock_irqsave(&cluster->secondary_lock, flags_secondary);
+
 	TRACE("acquire %d lock:release_jobs \n",cluster->clusterID );
 
 	__merge_ready(&cluster->domain, tasks);
 	check_for_preemptions(cluster);
 
 	TRACE("Releasing %d lock:relase_jobs \n",cluster->clusterID );
+	raw_spin_unlock_irqrestore(&cluster->secondary_lock, flags_secondary);
 	raw_spin_unlock_irqrestore(&cluster->cluster_lock, flags);
 }
 
@@ -1079,6 +1083,7 @@ static void acedf_finish_switch(struct task_struct *prev)
 static void acedf_task_new(struct task_struct * t, int on_rq, int is_scheduled)
 {
 	unsigned long 		flags;
+	unsigned long 		flags_secondary;
 	cpu_entry_t* 		entry;
 	acedf_domain_t*		cluster;
 	int localNumber; 
@@ -1091,6 +1096,7 @@ static void acedf_task_new(struct task_struct * t, int on_rq, int is_scheduled)
 	TRACE("ACEDF: Task , %d, is initially assigned to %d\n", t->pid, cluster->clusterID);
 
 	raw_spin_lock_irqsave(&cluster->cluster_lock, flags);
+	raw_spin_lock_irqsave(&cluster->secondary_lock, flags_secondary);
 	TRACE("Acquire %d lock:new \n",cluster->clusterID );
 
 	localNumber = currentNumberTasks_acedf; 
@@ -1134,12 +1140,14 @@ static void acedf_task_new(struct task_struct * t, int on_rq, int is_scheduled)
 	if (is_running(t))
 		acedf_job_arrival(t);
 	TRACE("Releasing %d lock:New \n",cluster->clusterID );
+	raw_spin_unlock_irqrestore(&cluster->secondary_lock, flags_secondary);
 	raw_spin_unlock_irqrestore(&(cluster->cluster_lock), flags);
 }
 
 static void acedf_task_wake_up(struct task_struct *task)
 {
 	unsigned long flags;
+	unsigned long flags_secondary;
 	lt_t now;
 	acedf_domain_t *cluster;
 
@@ -1148,6 +1156,7 @@ static void acedf_task_wake_up(struct task_struct *task)
 	cluster = task_cpu_cluster(task);
 
 	raw_spin_lock_irqsave(&cluster->cluster_lock, flags);
+	raw_spin_lock_irqsave(&cluster->secondary_lock, flags_secondary);
 	TRACE("acquire %d lock:wake \n",cluster->clusterID );
 	now = litmus_clock();
 	if (is_sporadic(task) && is_tardy(task, now)) {
@@ -1157,12 +1166,14 @@ static void acedf_task_wake_up(struct task_struct *task)
 	}
 	acedf_job_arrival(task);
 	TRACE("Releasing %d lock:wake \n",cluster->clusterID );
+	raw_spin_unlock_irqrestore(&cluster->secondary_lock, flags_secondary);
 	raw_spin_unlock_irqrestore(&cluster->cluster_lock, flags);
 }
 
 static void acedf_task_block(struct task_struct *t)
 {
 	unsigned long flags;
+	unsigned long flags_secondary; 
 	acedf_domain_t *cluster;
 
 	TRACE_TASK(t, "block at %llu\n", litmus_clock());
@@ -1171,9 +1182,12 @@ static void acedf_task_block(struct task_struct *t)
 
 	/* unlink if necessary */
 	raw_spin_lock_irqsave(&cluster->cluster_lock, flags);
+	raw_spin_lock_irqsave(&cluster->secondary_lock, flags_secondary);
+
 	TRACE("Acquire %d lock:Block \n",cluster->clusterID );
 	unlink(t);
 	TRACE("Releasing %d lock:Block \n",cluster->clusterID );
+	raw_spin_unlock_irqrestore(&cluster->secondary_lock, flags_secondary);
 	raw_spin_unlock_irqrestore(&cluster->cluster_lock, flags);
 
 	BUG_ON(!is_realtime(t));
@@ -1183,10 +1197,13 @@ static void acedf_task_block(struct task_struct *t)
 static void acedf_task_exit(struct task_struct * t)
 {
 	unsigned long flags;
+	unsigned long flags_secondary;
 	acedf_domain_t *cluster = task_cpu_cluster(t);
 
 	/* unlink if necessary */
 	raw_spin_lock_irqsave(&cluster->cluster_lock, flags);
+	raw_spin_lock_irqsave(&cluster->secondary_lock, flags_secondary);
+
 	TRACE("Acquire %d lock:exit \n",cluster->clusterID );
 	unlink(t);
 	if (tsk_rt(t)->scheduled_on != NO_CPU) {
@@ -1196,6 +1213,7 @@ static void acedf_task_exit(struct task_struct * t)
 		tsk_rt(t)->scheduled_on = NO_CPU;
 	}
 	TRACE("Releasing %d lock:exit \n",cluster->clusterID );
+	raw_spin_unlock_irqrestore(&cluster->secondary_lock, flags_secondary);
 	raw_spin_unlock_irqrestore(&cluster->cluster_lock, flags);
 
 	BUG_ON(!is_realtime(t));
