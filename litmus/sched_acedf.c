@@ -105,6 +105,9 @@ typedef struct clusterdomain {
 	/* the cpus queue themselves according to priority in here */
 	struct bheap_node *heap_node;
 	struct bheap      cpu_heap;
+	
+	/* To migrate between clusters we'll need two locks */
+	raw_spinlock_t secondary_lock;
 	/* lock for this cluster */
 #define cluster_lock domain.ready_lock
 } acedf_domain_t;
@@ -135,6 +138,9 @@ static int target_cluster_tasks[100];
 //of tasks in the system and add them to the task_struct. 
 static int currentNumberTasks_acedf;
 
+//NOTE: I'm keeping this here for legacy reasons, I should probably remove it 
+//at some point, but  agsnedf_total_utilization_acedf is meaningless for clustered
+//Systems
 static double agsnedf_total_utilization_acedf;
 //TODO-AARON: This only works with 100 clusters. 
 static double acedf_cluster_total_utilization[100]; 
@@ -350,7 +356,7 @@ static void check_for_preemptions(acedf_domain_t *cluster)
 		link_task_to_cpu(task, local);
 		preempt(local);
 	} else if (task && !local->linked && task-> rt_param.task_params.cpu != local->cluster->representative_CPU ) { /* TODO: Erase the else if, this is just for testing purposes */
-		TRACE_TASK(task, "is on a different cluster, so, we're not linking to  %d\ n", local->cpu);
+		TRACE_TASK(task, "is on a different cluster, so, we're not linking to  %d\n", local->cpu);
 	}
 	
 #endif
@@ -653,45 +659,51 @@ static void acedf_migrate_to(struct task_struct* task_to_migrate, int target_clu
 // 	struct task_struct* t = task_to_migrate;
 // 	acedf_domain_t* from;
 // 	acedf_domain_t* target_cluster = &(acedf[target_cluster_id]);
-	unsigned long flags;
- 	acedf_domain_t *oldcluster = task_cpu_cluster(task_to_migrate);
- 	int oldClusterID  = oldcluster-> clusterID;
+TRACE("Trying to migrate %d to %d \n",task_to_migrate->pid,target_cluster_id  );
+			unsigned long flags;
+			acedf_domain_t *oldcluster = task_cpu_cluster(task_to_migrate);
+			int oldClusterID  = oldcluster-> clusterID;
 	
-	/* Acquire the global lock first so that we don't cause deadlock */ 
-	raw_spin_lock_irqsave(&global_lock, flags);
-	TRACE("acquire GLOBAL lock:migrate \n");
-	raw_spin_lock(&(acedf[target_cluster_id].cluster_lock)); 
-	TRACE("FAKE ACQUIRE %d lock:Schedule \n",acedf[target_cluster_id].clusterID );
+			/* Acquire the global lock first so that we don't cause deadlock */ 
+			//raw_spin_lock_irqsave(&global_lock, flags);
+			TRACE("For Task %d, acquire GLOBAL lock:migrate \n", task_to_migrate->pid);
+			if (task_to_migrate->rt_param.task_params.cpu !=acedf[target_cluster_id].representative_CPU){
+				/*if (target_cluster_id == 0 ) {
+					raw_spin_lock(&(acedf[target_cluster_id].cluster_lock)); 
+				}*/
+			} else {
+				TRACE("Task %d is trying to migrate to itself on  %d lock:Schedule \n",task_to_migrate->pid, task_to_migrate->rt_param.task_params.cpu );
+			}
+			TRACE("For Task %d, FAKE ACQUIRE %d lock:Schedule \n",task_to_migrate->pid,acedf[target_cluster_id].clusterID );
 	
 	
-	TRACE("ACEDF**&&**: Task , %d, Intially on %d\n", task_to_migrate->pid, task_cpu_cluster(task_to_migrate)->clusterID);
-	task_to_migrate->rt_param.task_params.cpu = acedf[target_cluster_id].representative_CPU;
-	
-	//could cause synchronization issue. 
-	acedf_cluster_total_utilization[target_cluster_id] += get_estimated_weight(task_to_migrate);
-	acedf_cluster_total_utilization[oldClusterID] -= get_estimated_weight(task_to_migrate);
-	
+			TRACE("ACEDF**&&**: Task , %d, Intially on %d soon to be on %d\n", task_to_migrate->pid, task_cpu_cluster(task_to_migrate)->clusterID, target_cluster_id);
+			task_to_migrate->rt_param.task_params.cpu = acedf[target_cluster_id].representative_CPU;
+			
+			//could cause synchronization issue. 
+			acedf_cluster_total_utilization[target_cluster_id] += get_estimated_weight(task_to_migrate);
+			acedf_cluster_total_utilization[oldClusterID] -= get_estimated_weight(task_to_migrate);
 
-// 	if (oldcluster->clusterID==0){
-// 		task_to_migrate->rt_param.task_params.cpu = acedf[1].representative_CPU;
-// 	} else {
-// 		task_to_migrate->rt_param.task_params.cpu = acedf[0].representative_CPU;
-// 	}
+	
+			TRACE("For Task %d,FAKEReleasing %d lock:Schedule \n",task_to_migrate->pid,acedf[target_cluster_id].clusterID );
+				/*if ((task_to_migrate->rt_param.task_params.cpu !=acedf[target_cluster_id].representative_CPU) && (target_cluster_id == 0)) {
+					raw_spin_unlock(&(acedf[target_cluster_id].cluster_lock)); 
+				}*/
+				
+			TRACE("For Task %d, RElease GLOBAL lock:migrate \n", task_to_migrate->pid);
+			//raw_spin_unlock_irqrestore(&global_lock, flags);
 
-	TRACE("FAKEReleasing %d lock:Schedule \n",acedf[target_cluster_id].clusterID );
-	raw_spin_unlock(&(acedf[target_cluster_id].cluster_lock));
-	TRACE("RElease GLOBAL lock:migrate \n");
-	raw_spin_unlock_irqrestore(&global_lock, flags);
 }
 
 
-static noinline void job_completion(struct task_struct *t, int forced)
+static noinline int job_completion(struct task_struct *t, int forced)
 {
 
 	int i;
 	int cluster_id;
-	//Remove in the future!
+
 	acedf_domain_t *oldcluster;
+	acedf_domain_t *newcluster;
 
 	//TODO: Change this if I want to trigger a weight change when we have fewer than 2 CPUS left
 	const int bufferCPUs = 5; //Note: On my 12 core (24 virtual processors)
@@ -812,27 +824,51 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	unlink(t);
 	/* requeue
 	 * But don't requeue a blocking task. */
-	if (is_running(t)) {
+	if (is_running(t)) { 
+		
+		
 		if(t->rt_param.task_params.target_cpu != t->rt_param.task_params.cpu){
+			oldcluster = remote_cluster(t->rt_param.task_params.cpu); 
+			newcluster = remote_cluster(t->rt_param.task_params.target_cpu);
+			//Release the secondar lock
+			raw_spin_unlock(&oldcluster->secondary_lock);
+			
+			//reaquire all the locks
+			for(i =0; i< acedf_number_of_clusters; i++ ){
+				raw_spin_lock(&acedf[i].secondary_lock);
+			}
+
+			
 			TRACE("Migrating task %d to %d\n", t->pid, t->rt_param.task_params.target_cpu);
-			acedf_migrate_to(t, remote_cluster(t->rt_param.task_params.target_cpu));
+			acedf_migrate_to(t, newcluster->clusterID);
+			
+			//release all the locks
+			for(i =0; i< acedf_number_of_clusters; i++ ){
+				if (i !=oldcluster->clusterID){
+					raw_spin_unlock(&acedf[i].secondary_lock);
+				}
+			}
+
+			//raw_spin_lock(&oldcluster->secondary_lock);
+			
 		}
 		//TODO: change this to move to the ACTUAL new location
 		/* **************** GOOD EXAMPLE ******************** */
 		/* The following code is great example of how to change between clusters
 		   Keep it around until I establish a reweighting protocol */
-/*		oldcluster = task_cpu_cluster(t);
-		if (oldcluster->clusterID==0){
-			TRACE("ACEDF**FFFF**: Task , %d, is on 0, changing  to 1\n", t->pid);
-			acedf_migrate_to(t, 1);
+//		oldcluster = task_cpu_cluster(t);
+		if (t->rt_param.task_params.target_cpu==0){
+			TRACE("ACEDF**FFFF**: Changing the target from 0 to 1 for %d\n", t->pid);
+			t->rt_param.task_params.target_cpu = 1;
 		} else {
-		TRACE("ACEDF**FFFF**: Task , %d, is on 1, changing  to 0\n", t->pid);
-			acedf_migrate_to(t, 0);
-		}*/
+			TRACE("ACEDF**FFFF**: Changing the target from 1 to 0 for %d\n", t->pid);
+			t->rt_param.task_params.target_cpu = 0;
+		}
 	
 		acedf_job_arrival(t);
 	}
 	TRACE("ACEDF:Complete: Task , %d, now on C%d\n", t->pid, task_cpu_cluster(t)->clusterID);
+	return -1;
 }
 
 
@@ -864,6 +900,7 @@ static noinline void job_completion(struct task_struct *t, int forced)
  */
 static struct task_struct* acedf_schedule(struct task_struct * prev)
 {
+	int schedule_normal_path = -1;
 	cpu_entry_t* entry = &__get_cpu_var(acedf_cpu_entries);
 	acedf_domain_t *cluster = entry->cluster;
 	int out_of_time, sleep, preempt, np, exists, blocks;
@@ -881,6 +918,8 @@ static struct task_struct* acedf_schedule(struct task_struct * prev)
 
 	raw_spin_lock(&cluster->cluster_lock);
 	TRACE("Acquire cluster %d lock:Schedule \n",cluster->clusterID );
+	raw_spin_lock(&cluster->secondary_lock);
+	
 	clear_will_schedule();
 
 	/* sanity checking */
@@ -934,39 +973,73 @@ static struct task_struct* acedf_schedule(struct task_struct * prev)
 	 * for blocked jobs).
 	 */
 	if (!np && (out_of_time || sleep) && !blocks)
-		job_completion(entry->scheduled, !sleep);
+		schedule_normal_path = job_completion(entry->scheduled, !sleep);
 
-	/* Link pending task if we became unlinked.
-	 */
-	if (!entry->linked)
-		link_task_to_cpu(__take_ready(&cluster->domain), entry);
-
-	/* The final scheduling decision. Do we need to switch for some reason?
-	 * If linked is different from scheduled, then select linked as next.
-	 */
-	if ((!np || blocks) &&
-	    entry->linked != entry->scheduled) {
-		/* Schedule a linked job? */
-		if (entry->linked) {
-			entry->linked->rt_param.scheduled_on = entry->cpu;
-			next = entry->linked;
-		}
-		if (entry->scheduled) {
-			/* not gonna be scheduled soon */
-			entry->scheduled->rt_param.scheduled_on = NO_CPU;
-			TRACE_TASK(entry->scheduled, "scheduled_on = NO_CPU\n");
-		}
-	} else
-		/* Only override Linux scheduler if we have a real-time task
-		 * scheduled that needs to continue.
+	if (schedule_normal_path == -1 ){
+		/* Link pending task if we became unlinked.
 		 */
-		if (exists)
-			next = prev;
+		if (!entry->linked)
+			link_task_to_cpu(__take_ready(&cluster->domain), entry);
 
-	sched_state_task_picked();
-	TRACE("Releasing %d lock:Schedule \n",cluster->clusterID );
+		/* The final scheduling decision. Do we need to switch for some reason?
+		 * If linked is different from scheduled, then select linked as next.
+		 */
+		if ((!np || blocks) &&
+			entry->linked != entry->scheduled) {
+			/* Schedule a linked job? */
+			if (entry->linked) {
+				entry->linked->rt_param.scheduled_on = entry->cpu;
+				next = entry->linked;
+			}
+			if (entry->scheduled) {
+				/* not gonna be scheduled soon */
+				entry->scheduled->rt_param.scheduled_on = NO_CPU;
+				TRACE_TASK(entry->scheduled, "scheduled_on = NO_CPU\n");
+			}
+		} else
+			/* Only override Linux scheduler if we have a real-time task
+			 * scheduled that needs to continue.
+			 */
+			if (exists)
+				next = prev;
 
-	raw_spin_unlock(&cluster->cluster_lock);
+		sched_state_task_picked();
+		TRACE("Releasing %d lock:Schedule \n",cluster->clusterID );
+		raw_spin_unlock(&cluster->secondary_lock);
+		raw_spin_unlock(&cluster->cluster_lock);
+	} else { // We run this path if we migrate a task between processors
+		/* Link pending task if we became unlinked. */
+		if (!entry->linked)
+			link_task_to_cpu(__take_ready(&cluster->domain), entry);
+
+		/* The final scheduling decision. Do we need to switch for some reason?
+		 * If linked is different from scheduled, then select linked as next.
+		 */
+		if ((!np || blocks) &&
+			entry->linked != entry->scheduled) {
+			/* Schedule a linked job? */
+			if (entry->linked) {
+				entry->linked->rt_param.scheduled_on = entry->cpu;
+				next = entry->linked;
+			}
+			if (entry->scheduled) {
+				/* not gonna be scheduled soon */
+				entry->scheduled->rt_param.scheduled_on = NO_CPU;
+				TRACE_TASK(entry->scheduled, "scheduled_on = NO_CPU\n");
+			}
+		} else
+			/* Only override Linux scheduler if we have a real-time task
+			 * scheduled that needs to continue.
+			 */
+			if (exists)
+				next = prev;
+
+		sched_state_task_picked();
+		TRACE("Releasing %d lock:Schedule \n",cluster->clusterID );
+		//TODO change the cluster we are scheduling on 
+		raw_spin_unlock(&cluster->secondary_lock);
+		raw_spin_unlock(&cluster->cluster_lock);
+	}
 
 #ifdef WANT_ALL_SCHED_EVENTS
 	TRACE("acedf_lock released, next=0x%p\n", next);
@@ -1292,6 +1365,7 @@ static long acedf_activate_plugin(void)
 		acedf[i].heap_node = kmalloc(
 				cluster_size * sizeof(struct bheap_node),
 				GFP_ATOMIC);
+		raw_spin_lock_init(&acedf[i].secondary_lock);
 		bheap_init(&(acedf[i].cpu_heap));
 		edf_domain_init(&(acedf[i].domain), NULL, acedf_release_jobs);
 
