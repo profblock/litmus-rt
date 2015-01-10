@@ -844,28 +844,32 @@ static noinline int job_completion(struct task_struct *t, int forced)
 			
 			//release all the locks
 			for(i =0; i< acedf_number_of_clusters; i++ ){
-				if (i !=oldcluster->clusterID){
+				if (i !=oldcluster->clusterID && i !=newcluster->clusterID){
 					raw_spin_unlock(&acedf[i].secondary_lock);
 				}
 			}
 
 			//raw_spin_lock(&oldcluster->secondary_lock);
 			
-		}
-		//TODO: change this to move to the ACTUAL new location
-		/* **************** GOOD EXAMPLE ******************** */
-		/* The following code is great example of how to change between clusters
-		   Keep it around until I establish a reweighting protocol */
-//		oldcluster = task_cpu_cluster(t);
-		if (t->rt_param.task_params.target_cpu==0){
-			TRACE("ACEDF**FFFF**: Changing the target from 0 to 1 for %d\n", t->pid);
-			t->rt_param.task_params.target_cpu = 1;
+			acedf_job_arrival(t);
+			return newcluster->clusterID;
 		} else {
-			TRACE("ACEDF**FFFF**: Changing the target from 1 to 0 for %d\n", t->pid);
-			t->rt_param.task_params.target_cpu = 0;
-		}
+			//TODO: change this to move to the ACTUAL new location
+
+			/* **************** GOOD EXAMPLE ******************** */
+			/* The following code is great example of how to change between clusters
+			   Keep it around until I establish a reweighting protocol */
+	//		oldcluster = task_cpu_cluster(t);
+			if (t->rt_param.task_params.target_cpu==0){
+				TRACE("ACEDF**FFFF**: Changing the target from 0 to 1 for %d\n", t->pid);
+				t->rt_param.task_params.target_cpu = 1;
+			} else {
+				TRACE("ACEDF**FFFF**: Changing the target from 1 to 0 for %d\n", t->pid);
+				t->rt_param.task_params.target_cpu = 0;
+			}
 	
-		acedf_job_arrival(t);
+			acedf_job_arrival(t);
+		}
 	}
 	TRACE("ACEDF:Complete: Task , %d, now on C%d\n", t->pid, task_cpu_cluster(t)->clusterID);
 	return -1;
@@ -1034,9 +1038,10 @@ static struct task_struct* acedf_schedule(struct task_struct * prev)
 			if (exists)
 				next = prev;
 
-		sched_state_task_picked();
+		sched_state_task_picked();  
 		TRACE("Releasing %d lock:Schedule \n",cluster->clusterID );
 		//TODO change the cluster we are scheduling on 
+		raw_spin_unlock(&acedf[schedule_normal_path].secondary_lock);
 		raw_spin_unlock(&cluster->secondary_lock);
 		raw_spin_unlock(&cluster->cluster_lock);
 	}
