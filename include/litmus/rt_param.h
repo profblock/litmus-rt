@@ -108,6 +108,9 @@ struct rt_task {
 	/* CPU task will migrate to */
 	unsigned int	target_cpu;	
 	
+	/* The service level that the task will change to next time */
+	unsigned int	target_service_level;	
+	
 	/* adaptive tasks may have multiple service levels */	
 	struct rt_service_level* service_levels;
  
