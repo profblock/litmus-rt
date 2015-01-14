@@ -941,29 +941,30 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 			//The first check (pre-locks) gets ride of most of the request
 			//This check provents race conditions
 	
-			raw_spin_unlock(&acedf[clusterID].secondary_lock);
+/*			raw_spin_unlock(&acedf[clusterID].secondary_lock);
 	
 			//reaquire all the locks
 			for(i =0; i< acedf_number_of_clusters; i++ ){
 				raw_spin_lock(&acedf[i].secondary_lock);
 			}
 	
-			TRACE("Triggering repartition\n");
+*/			
 	
 	//release all the locks
-
+			TRACE("Possible repartition\n");
 
 			if ((lastRepartitionTime_acedf + nanosecondsBetweenRepartitions_acedf) < litmus_clock()){
 				lastRepartitionTime_acedf = litmus_clock();
-				repartition_tasks_acedf(clusterID);
+				TRACE("Triggering repartition\n");	
+				//repartition_tasks_acedf(clusterID);
 			} 
-			
+/*			
 			for(i =0; i< acedf_number_of_clusters; i++ ){
 				if (i !=clusterID ){
 					raw_spin_unlock(&acedf[i].secondary_lock);
 				}
 			}
-			
+*/
 		
 			TRACE("The min qos is %d, the max qos is %d, the ratio is %df, this qos is %d\n", (int)(min_qos*100), (int)(max_qos*100), (int)(100*max_qos/min_qos), (int)(100*acedf_cluster_total_QoS[clusterID]));
 		}		
@@ -1426,6 +1427,9 @@ static void acedf_task_new(struct task_struct * t, int on_rq, int is_scheduled)
 	
 	//we don't want tasks migrating initially
 	t->rt_param.task_params.target_cpu = t->rt_param.task_params.cpu;
+	
+	//No target service level to begin with 
+	t->rt_param.task_params.target_service_level = -1;
 	
 	/* setup job params */
 	release_at(t, litmus_clock());

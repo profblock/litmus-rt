@@ -105,15 +105,14 @@ struct rt_task {
 	budget_policy_t  budget_policy;  /* ignored by pfair */
 	release_policy_t release_policy;
 	
-	/* CPU task will migrate to */
+	/* adaptive tasks may have multiple service levels */	
+	struct rt_service_level* service_levels;
+ 
+ 	/* CPU task will migrate to */
 	unsigned int	target_cpu;	
 	
 	/* The service level that the task will change to next time */
 	unsigned int	target_service_level;	
-	
-	/* adaptive tasks may have multiple service levels */	
-	struct rt_service_level* service_levels;
- 
 };
 
 union np_flag {
