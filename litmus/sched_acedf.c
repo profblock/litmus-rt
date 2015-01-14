@@ -941,14 +941,14 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 			//The first check (pre-locks) gets ride of most of the request
 			//This check provents race conditions
 	
-/*			raw_spin_unlock(&acedf[clusterID].secondary_lock);
+			raw_spin_unlock(&acedf[clusterID].secondary_lock);
 	
 			//reaquire all the locks
 			for(i =0; i< acedf_number_of_clusters; i++ ){
 				raw_spin_lock(&acedf[i].secondary_lock);
 			}
 	
-*/			
+			
 	
 	//release all the locks
 			TRACE("Possible repartition\n");
@@ -956,15 +956,15 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 			if ((lastRepartitionTime_acedf + nanosecondsBetweenRepartitions_acedf) < litmus_clock()){
 				lastRepartitionTime_acedf = litmus_clock();
 				TRACE("Triggering repartition\n");	
-				//repartition_tasks_acedf(clusterID);
+				repartition_tasks_acedf(clusterID);
 			} 
-/*			
+			
 			for(i =0; i< acedf_number_of_clusters; i++ ){
 				if (i !=clusterID ){
 					raw_spin_unlock(&acedf[i].secondary_lock);
 				}
 			}
-*/
+
 		
 			TRACE("The min qos is %d, the max qos is %d, the ratio is %df, this qos is %d\n", (int)(min_qos*100), (int)(max_qos*100), (int)(100*max_qos/min_qos), (int)(100*acedf_cluster_total_QoS[clusterID]));
 		}		
