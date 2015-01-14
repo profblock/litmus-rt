@@ -674,12 +674,22 @@ static void repartition_tasks_acedf(int clusterID){
 			TRACE("Task %d, the total Utilization %d\n", outerIndex, aConvertValue);
 		}
 	
+	// ***********************************************************************************
+	// ***********************************************************************************
+	// TOOD: FOR RETURNING
+	// Change the target_cpu and the target_service level for each task in the for loop here
+	// DO NOT change the service level or the CPU. 
+	// 
+	// In addition you need to change the "job completition method" so that if there is a
+	// target service level, then we'll change it there and we WON'T trigger a reweighting event. 
 	
 		// Go through and actually change the weight of each task now that all the work is done.
-	// 	for(outerIndex=0; outerIndex < currentNumberTasks_acedf; outerIndex++) {
+		for(outerIndex=0; outerIndex < currentNumberTasks_acedf; outerIndex++) {
+			local_copy[outerIndex]->rt_param.task_params.target_cpu = taskCluster[outerIndex];
+			local_copy[outerIndex]->rt_param.task_params.target_service_level = taskLevel[outerIndex];
 	// 		tsk_rt(local_copy[outerIndex])->ctrl_page->service_level = taskLevel[outerIndex];
 	// 		TRACE("&&The service level for %d is %d\n", outerIndex, taskLevel[outerIndex]);
-	// 	}
+	 	}
 	}
 
 	
@@ -1128,6 +1138,12 @@ static noinline int job_completion(struct task_struct *t, int forced)
 		triggerReweightNow = 0;
 	}
 	
+	if (tsk_rt(t)->ctrl_page->service_level != t->rt_param.task_params.target_service_level) {
+		//triggerReweightNow = 0; // Don't trigger we are just going to change this one task 
+		tsk_rt(t)->ctrl_page->service_level = t->rt_param.task_params.target_service_level;
+		TRACE("Service Level mismatch, changing");
+	}		
+
 	adjust_all_service_levels_acedf(triggerReweightNow,cluster_id);
 	
 	//This line is also incorect. No idea why it would let me use it
@@ -1428,8 +1444,7 @@ static void acedf_task_new(struct task_struct * t, int on_rq, int is_scheduled)
 	//we don't want tasks migrating initially
 	t->rt_param.task_params.target_cpu = t->rt_param.task_params.cpu;
 	
-	//No target service level to begin with 
-	t->rt_param.task_params.target_service_level = -1;
+
 	
 	/* setup job params */
 	release_at(t, litmus_clock());
@@ -1457,6 +1472,9 @@ static void acedf_task_new(struct task_struct * t, int on_rq, int is_scheduled)
 	}
 	t->rt_param.linked_on          = NO_CPU;
 
+	//No target service level to begin with 
+	t->rt_param.task_params.target_service_level = tsk_rt(t)->ctrl_page->service_level;
+	
 	if (is_running(t))
 		acedf_job_arrival(t);
 	TRACE("Releasing %d lock:New \n",cluster->clusterID );
