@@ -687,9 +687,12 @@ static void repartition_tasks_acedf(int clusterID){
 		for(outerIndex=0; outerIndex < currentNumberTasks_acedf; outerIndex++) {
 			local_copy[outerIndex]->rt_param.task_params.target_cpu = taskCluster[outerIndex];
 			local_copy[outerIndex]->rt_param.task_params.target_service_level = taskLevel[outerIndex];
-	// 		tsk_rt(local_copy[outerIndex])->ctrl_page->service_level = taskLevel[outerIndex];
-	// 		TRACE("&&The service level for %d is %d\n", outerIndex, taskLevel[outerIndex]);
 	 	}
+	 	
+	 	// Change the repartitioning time to now for all clusters. 
+	 	for(outerIndex = 0; outerIndex < num_clusters; outerIndex++){
+		 	lastReweightTime_acedf[outerIndex] = litmus_clock();
+		 }
 	}
 
 	
@@ -987,42 +990,40 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 
 static void acedf_migrate_to(struct task_struct* task_to_migrate, int target_cluster_id)
 {
-// 	struct task_struct* t = task_to_migrate;
-// 	acedf_domain_t* from;
-// 	acedf_domain_t* target_cluster = &(acedf[target_cluster_id]);
-TRACE("Trying to migrate %d to %d \n",task_to_migrate->pid,target_cluster_id  );
-			unsigned long flags;
-			acedf_domain_t *oldcluster = task_cpu_cluster(task_to_migrate);
-			int oldClusterID  = oldcluster-> clusterID;
-	
-			/* Acquire the global lock first so that we don't cause deadlock */ 
-			//raw_spin_lock_irqsave(&global_lock, flags);
-			TRACE("For Task %d, acquire GLOBAL lock:migrate \n", task_to_migrate->pid);
-			if (task_to_migrate->rt_param.task_params.cpu !=acedf[target_cluster_id].representative_CPU){
-				/*if (target_cluster_id == 0 ) {
-					raw_spin_lock(&(acedf[target_cluster_id].cluster_lock)); 
-				}*/
-			} else {
-				TRACE("Task %d is trying to migrate to itself on  %d lock:Schedule \n",task_to_migrate->pid, task_to_migrate->rt_param.task_params.cpu );
-			}
-			TRACE("For Task %d, FAKE ACQUIRE %d lock:Schedule \n",task_to_migrate->pid,acedf[target_cluster_id].clusterID );
-	
-	
-			TRACE("ACEDF**&&**: Task , %d, Intially on %d soon to be on %d\n", task_to_migrate->pid, task_cpu_cluster(task_to_migrate)->clusterID, target_cluster_id);
-			task_to_migrate->rt_param.task_params.cpu = acedf[target_cluster_id].representative_CPU;
-			
-			//could cause synchronization issue. 
-			acedf_cluster_total_utilization[target_cluster_id] += get_estimated_weight(task_to_migrate);
-			acedf_cluster_total_utilization[oldClusterID] -= get_estimated_weight(task_to_migrate);
 
+	TRACE("Trying to migrate %d to %d \n",task_to_migrate->pid,target_cluster_id  );
+	unsigned long flags;
+	acedf_domain_t *oldcluster = task_cpu_cluster(task_to_migrate);
+	int oldClusterID  = oldcluster-> clusterID;
+
+	/* Acquire the global lock first so that we don't cause deadlock */ 
+	//raw_spin_lock_irqsave(&global_lock, flags);
+	TRACE("For Task %d, acquire GLOBAL lock:migrate \n", task_to_migrate->pid);
+	if (task_to_migrate->rt_param.task_params.cpu !=acedf[target_cluster_id].representative_CPU){
+		/*if (target_cluster_id == 0 ) {
+			raw_spin_lock(&(acedf[target_cluster_id].cluster_lock)); 
+		}*/
+	} else {
+		TRACE("Task %d is trying to migrate to itself on  %d lock:Schedule \n",task_to_migrate->pid, task_to_migrate->rt_param.task_params.cpu );
+	}
+	TRACE("For Task %d, FAKE ACQUIRE %d lock:Schedule \n",task_to_migrate->pid,acedf[target_cluster_id].clusterID );
+
+
+	TRACE("ACEDF**&&**: Task , %d, Intially on %d soon to be on %d\n", task_to_migrate->pid, task_cpu_cluster(task_to_migrate)->clusterID, target_cluster_id);
+	task_to_migrate->rt_param.task_params.cpu = acedf[target_cluster_id].representative_CPU;
 	
-			TRACE("For Task %d,FAKEReleasing %d lock:Schedule \n",task_to_migrate->pid,acedf[target_cluster_id].clusterID );
-				/*if ((task_to_migrate->rt_param.task_params.cpu !=acedf[target_cluster_id].representative_CPU) && (target_cluster_id == 0)) {
-					raw_spin_unlock(&(acedf[target_cluster_id].cluster_lock)); 
-				}*/
-				
-			TRACE("For Task %d, RElease GLOBAL lock:migrate \n", task_to_migrate->pid);
-			//raw_spin_unlock_irqrestore(&global_lock, flags);
+	//could cause synchronization issue. 
+	acedf_cluster_total_utilization[target_cluster_id] += get_estimated_weight(task_to_migrate);
+	acedf_cluster_total_utilization[oldClusterID] -= get_estimated_weight(task_to_migrate);
+
+
+	TRACE("For Task %d,FAKEReleasing %d lock:Schedule \n",task_to_migrate->pid,acedf[target_cluster_id].clusterID );
+		/*if ((task_to_migrate->rt_param.task_params.cpu !=acedf[target_cluster_id].representative_CPU) && (target_cluster_id == 0)) {
+			raw_spin_unlock(&(acedf[target_cluster_id].cluster_lock)); 
+		}*/
+		
+	TRACE("For Task %d, RElease GLOBAL lock:migrate \n", task_to_migrate->pid);
+	//raw_spin_unlock_irqrestore(&global_lock, flags);
 
 }
 
@@ -1138,11 +1139,7 @@ static noinline int job_completion(struct task_struct *t, int forced)
 		triggerReweightNow = 0;
 	}
 	
-	if (tsk_rt(t)->ctrl_page->service_level != t->rt_param.task_params.target_service_level) {
-		//triggerReweightNow = 0; // Don't trigger we are just going to change this one task 
-		tsk_rt(t)->ctrl_page->service_level = t->rt_param.task_params.target_service_level;
-		TRACE("Service Level mismatch, changing");
-	}		
+		
 
 	adjust_all_service_levels_acedf(triggerReweightNow,cluster_id);
 	
@@ -1152,6 +1149,12 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	TRACE("A-GSN-EDF-Period: %llu\n", tsk_rt(t)->task_params.period);
 	TRACE("A-GSN-EDF-Deadline: %llu\n", tsk_rt(t)->task_params.relative_deadline);
 	
+	
+	if (tsk_rt(t)->ctrl_page->service_level != t->rt_param.task_params.target_service_level) {
+		tsk_rt(t)->ctrl_page->service_level = t->rt_param.task_params.target_service_level;
+		TRACE("changing Service level to be target");
+	}
+
 	
 	/* prepare for next period */
 	prepare_for_next_period(t);
@@ -1185,26 +1188,12 @@ static noinline int job_completion(struct task_struct *t, int forced)
 					raw_spin_unlock(&acedf[i].secondary_lock);
 				}
 			}
-
-			//raw_spin_lock(&oldcluster->secondary_lock);
-			
+						
 			acedf_job_arrival(t);
+			// We return a cluster ID because later on, we'll need to release the
+			// new cluster's lock ID as well. 
 			return newcluster->clusterID;
 		} else {
-			//TODO: change this to move to the ACTUAL new location
-
-			/* **************** GOOD EXAMPLE ******************** */
-			/* The following code is great example of how to change between clusters
-			   Keep it around until I establish a reweighting protocol */
-	//		oldcluster = task_cpu_cluster(t);
-// 			if (t->rt_param.task_params.target_cpu==0){
-// 				TRACE("ACEDF**FFFF**: Changing the target from 0 to 1 for %d\n", t->pid);
-// 				t->rt_param.task_params.target_cpu = 1;
-// 			} else {
-// 				TRACE("ACEDF**FFFF**: Changing the target from 1 to 0 for %d\n", t->pid);
-// 				t->rt_param.task_params.target_cpu = 0;
-// 			}
-// 	
 			acedf_job_arrival(t);
 		}
 	}
