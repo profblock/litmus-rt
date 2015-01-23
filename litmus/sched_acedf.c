@@ -114,6 +114,8 @@ typedef struct clusterdomain {
 
 static raw_spinlock_t global_lock;
 
+#define NUMBER_OF_WITHELD_CPUS 2
+
 /* a acedf_domain per cluster; allocation is done at init/activation time */
 acedf_domain_t *acedf;
 
@@ -146,10 +148,10 @@ static int currentNumberTasks_acedf;
 static double acedf_cluster_total_utilization[MAX_CLUSTERS]; 
 static double acedf_cluster_total_QoS[MAX_CLUSTERS];
 static int acedf_number_of_clusters;
-static double acedf_cluster_max_utilization = 0.9; //I'm just setting this to 90% for now
-
-static const lt_t nanosecondsBetweenReweights_acedf = 1000000000/20; //Number of times per second that the system is weighted at a minimum;
-static const lt_t nanosecondsBetweenRepartitions_acedf = 1000000000/5; //Number of times per second that the system is repatitionined at a maximum ;
+static double acedf_cluster_max_utilization = 0.50; //I'm just setting this to 90% for now 
+ 
+static const lt_t nanosecondsBetweenReweights_acedf = 1000000000/5; //Number of times per second that the system is weighted at a minimum;
+static const lt_t nanosecondsBetweenRepartitions_acedf = 1000000000*2 /*/1*/; //Number of times per second that the system is repatitionined at a maximum ;
 static lt_t lastReweightTime_acedf[MAX_CLUSTERS]; //time used to keep track of the last time the cluster was reweighted
 static lt_t initialStartTime_acedf;//Time the first task starts
 static lt_t lastRepartitionTime_acedf; // Time of the last repartitioning of the system 
@@ -455,7 +457,7 @@ static void repartition_tasks_acedf(int clusterID){
 	struct task_struct *temp;
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
 	// This is how tsk_rt(t)->ctrl_page->service_level;
-	const int number_of_cpus_held_back = 5; //Note: On my 12 core (24 virtual processors)
+	const int number_of_cpus_held_back = NUMBER_OF_WITHELD_CPUS; //Note: On my 12 core (24 virtual processors)
 	//If this is under 5, then the system crashes. (Thus, the system runs on 19 virtual cores)
 	struct task_struct* local_copy[currentNumberTasks_acedf];
 	int local_cluster_copy[currentNumberTasks_acedf];
@@ -482,7 +484,7 @@ static void repartition_tasks_acedf(int clusterID){
 	double maxUtilization = cluster_size-number_of_cpus_held_back;
 	//This is the max_level 
 	//If repartition_trigger is at most 1.0, then it will never have any impact. 
-	const int max_level = 2; //max level should be 3, but crashing. So let's try 2
+	const int max_level = 3; //max level should be 3, but crashing. So let's try 2
 	const int lowest_level = 0; //lowest service level level should be 3, but crashing. So let's try 2
 	double calculationFactor;
 	int number_of_tasks_on_cluster = 0;
@@ -653,6 +655,7 @@ static void repartition_tasks_acedf(int clusterID){
 	//Even if we overload on one task, we still keep on increasing other tasks
 	//because we might be able to increase their levels slightly 
 	if(fail_repartition==0){
+		TRACE(",,,,,time,%llu,REPARTITIONING\n", litmus_clock());
 		for(outerIndex=0; outerIndex < currentNumberTasks_acedf; outerIndex++) {
 
 			//This assumes that all tasks have the same max service level
@@ -710,7 +713,7 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 	struct task_struct *temp;
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
 	// This is how tsk_rt(t)->ctrl_page->service_level;
-	const int number_of_cpus_held_back = 5; //Note: On my 12 core (24 virtual processors)
+	const int number_of_cpus_held_back = NUMBER_OF_WITHELD_CPUS; //Note: On my 12 core (24 virtual processors)
 	//If this is under 5, then the system crashes. (Thus, the system runs on 19 virtual cores)
 	struct task_struct* local_copy[currentNumberTasks_acedf];
 	int local_cluster_copy[currentNumberTasks_acedf];
@@ -733,8 +736,8 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 	double maxUtilization = cluster_size-number_of_cpus_held_back;
 	//This is the max_level 
 	//If repartition_trigger is at most 1.0, then it will never have any impact. 
-	const double repartition_trigger = 0.9; // TODO: Change this to a real value
-	const int max_level = 2; //max level should be 3, but crashing. So let's try 2
+	const double repartition_trigger = 1.25; // TODO: Change this to a real value
+	const int max_level = 3; //max level should be 3, but crashing. So let's try 2
 	const int lowest_level = 0; //lowest service level level should be 3, but crashing. So let's try 2
 	double calculationFactor;
 	int number_of_tasks_on_cluster = 0;
@@ -998,12 +1001,14 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	acedf_domain_t *newcluster;
 
 	//TODO: Change this if I want to trigger a weight change when we have fewer than 2 CPUS left
-	const int bufferCPUs = 3; //Note: On my 12 core (24 virtual processors)
+	const int bufferCPUs = NUMBER_OF_WITHELD_CPUS; //Note: On my 12 core (24 virtual processors)
 	//If this is under 5, then the system crashes. (Thus, the system runs on 19 virtual cores)
 	double old_est_weight;
 	double difference_in_weight;
 	int triggerReweightNow = 0;
+	int largeWeight = 0;
 	double maxUtilization;
+	int job_no;
 	const double PERCENT_CHANGE_TRIGGER = 0.125; // If the task's weight changes by this percentage
 	// between job releases, then trigger an immediate reweighting
 
@@ -1044,7 +1049,25 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	acedf_cluster_total_utilization[cluster_id] += difference_in_weight;
 	
 	//Trace TODO. This is the primary Trace I need to improve it 
-	TRACE("ACEDF: Task , %d, complete on %d\n", t->pid, task_cpu_cluster(t)->clusterID);
+
+	//tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].quality_of_service
+	largeWeight = 10000*get_estimated_weight(t);
+	if (largeWeight < 0){
+		TRACE("LARGE WEIGHT IS LESS THAN ZERO %d\n", largeWeight);
+		TRACE("SMALL WEIGHT %d\n", (int)(get_estimated_weight(t)*100));
+		TRACE("SMALLest WEIGHT %d\n", (int)(get_estimated_weight(t)*10));
+		if (get_estimated_weight(t)<0){
+			TRACE("Estimated weight is also less than zero");
+		}
+	}
+	job_no =  t->rt_param.job_params.job_no;
+	TRACE(",,,,,time,%llu,taskID,%d,cluster,%d,estWtTimes10000,%d,serviceLevel,%u,taskQoSTimes1000,%d,TOTALQoSTimes1000,jobNumber,%d\n", litmus_clock(), 
+	t->pid,
+	task_cpu_cluster(t)->clusterID,
+	largeWeight,
+	tsk_rt(t)->ctrl_page->service_level,
+	(int)(tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].quality_of_service*1000),
+	(int)(acedf_cluster_total_QoS[task_cpu_cluster(t)->clusterID]*1000), job_no);
 	// TODO: Consolidate
 // 	TRACE("***TASK SERVICE LEVEL :%u\n",tsk_rt(t)->ctrl_page->service_level);
 // 	TRACE("A-GSN-EDF-Period: %llu\n", tsk_rt(t)->task_params.period);
@@ -1074,14 +1097,17 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	//Trigger because the system is too utilized
 	if( acedf_cluster_total_utilization[cluster_id]  > maxUtilization) {
 		triggerReweightNow = 1;
+		largeWeight = 10000*acedf_cluster_total_utilization[cluster_id];
+		TRACE(",,,,,time,%llu,REWEIGHTOVER10000,%d,\n",litmus_clock(), largeWeight);
 	}
 	
 	
-	for(i =0; i< acedf_number_of_clusters; i++ ){
-		if (acedf_cluster_total_utilization[i] > acedf_cluster_max_utilization) {
-			triggerReweightNow = 1;
-		}
-	}
+// 	for(i =0; i< acedf_number_of_clusters; i++ ){
+// 	if (acedf_cluster_total_utilization[cluster_id] > acedf_cluster_max_utilization) { 
+// 		triggerReweightNow = 1;
+// 	}
+// 	}
+
 	
 	
 	//trigger because a task changed its weight by too much
