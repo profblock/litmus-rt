@@ -114,7 +114,8 @@ typedef struct clusterdomain {
 
 static raw_spinlock_t global_lock;
 
-#define NUMBER_OF_WITHELD_CPUS 2
+#define NUMBER_OF_WITHELD_CPUS 4
+#define MAX_CPUS_UTIL 0.90 
 
 /* a acedf_domain per cluster; allocation is done at init/activation time */
 acedf_domain_t *acedf;
@@ -148,14 +149,14 @@ static int currentNumberTasks_acedf;
 static double acedf_cluster_total_utilization[MAX_CLUSTERS]; 
 static double acedf_cluster_total_QoS[MAX_CLUSTERS];
 static int acedf_number_of_clusters;
-static double acedf_cluster_max_utilization = 0.50; //I'm just setting this to 90% for now 
+
  
-static const lt_t nanosecondsBetweenReweights_acedf = 1000000000/5; //Number of times per second that the system is weighted at a minimum;
+static const lt_t nanosecondsBetweenReweights_acedf = 1000000000/4; //Number of times per second that the system is weighted at a minimum;
 static const lt_t nanosecondsBetweenRepartitions_acedf = 1000000000*2 /*/1*/; //Number of times per second that the system is repatitionined at a maximum ;
 static lt_t lastReweightTime_acedf[MAX_CLUSTERS]; //time used to keep track of the last time the cluster was reweighted
 static lt_t initialStartTime_acedf;//Time the first task starts
 static lt_t lastRepartitionTime_acedf; // Time of the last repartitioning of the system 
-static lt_t initialStableWindowTime_acedf=((lt_t)10)*((lt_t)1000000000); //For the first 30 seconds, nothing happens. 
+static lt_t initialStableWindowTime_acedf=((lt_t)10)*((lt_t)1000000000); //For the first 10 seconds, nothing happens. 
 static int changeNow_acedf; //if 1, under utilized. if 0, nothing. -1 if over utilized
 
 /* total number of cluster */
@@ -443,6 +444,7 @@ static void calculate_estimated_execution_cost_acedf(struct task_struct *t, doub
 	/* Update the difference between the estimated and actual execution time*/
 	t->rt_param.current_diff_est_actual_exec_cost = 
 		 get_exec_time(t) - get_estimated_exec_time(t);
+ 	TRACE(",,,,time,%llu,task,%d,actualExecTime,%llu,estimated,%llu\n", litmus_clock(), t->pid,get_exec_time(t),get_estimated_exec_time(t));
  
 	t->rt_param.job_params.estimated_exec_time = 
 		(lt_t)	(p * t->rt_param.current_diff_est_actual_exec_cost + 
@@ -666,7 +668,7 @@ static void repartition_tasks_acedf(int clusterID){
 				calculationFactor = weightLevel[outerIndex] * tsk_rt(local_copy[outerIndex])->task_params.service_levels[innerIndex].relative_work;			
 			
 				//If we increased it, would the system be over utilized?
-				if( (localTotalUtilization[taskCluster[outerIndex]]-weightLevel[outerIndex]+calculationFactor) < maxUtilization) {
+				if( (calculationFactor<MAX_CPUS_UTIL) &&  ((localTotalUtilization[taskCluster[outerIndex]]-weightLevel[outerIndex]+calculationFactor) < maxUtilization)) {
 
 					//Increasing the weight of the task
 					taskLevel[outerIndex] = innerIndex;
@@ -732,6 +734,7 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 	double QoSUpperIndex; 
 	
 	int aConvertValue;
+	int bConvertValue;
 	double localTotalUtilization = 0;
 	double maxUtilization = cluster_size-number_of_cpus_held_back;
 	//This is the max_level 
@@ -747,10 +750,13 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 	int representative_CPU = acedf[clusterID].representative_CPU;
 	
 	//Improve the conditions here so it's time based not task release based. 
-	if( triggerReweightNow!=0 ) { 
+	//changeNow_acedf is used to change only once at the beginning
+	//changeNow_acedf=1;
+	if( triggerReweightNow!=0 /*&& changeNow_acedf==0*/) { 
+		//changeNow_acedf=1;
 		//Copying array to local copy
 		for(count = 0;count < currentNumberTasks_acedf; count++) {
-			if ( all_tasks_acedf[count]->rt_param.task_params.cpu != representative_CPU) {
+			if ( all_tasks_acedf[count]->rt_param.task_params.cpu == representative_CPU) {
 				local_copy[number_of_tasks_on_cluster] = all_tasks_acedf[count];
 				number_of_tasks_on_cluster++;
 			}
@@ -863,10 +869,20 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 				//we need to calculate it's weight if it were at service level zero. 
 				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]) / tsk_rt(local_copy[outerIndex])->task_params.service_levels[tsk_rt(local_copy[outerIndex])->ctrl_page->service_level].relative_work;				
 			}
+			//
+// 			aConvertValue = get_estimated_weight(local_copy[outerIndex])*10000;
+// 			bConvertValue = weightLevel[outerIndex]*10000;
+// 			TRACE(",,,,,,time,%llu,BEFORE:EstWeight10000,%d,adjustedValue10000,%d,id,%d,clusterID,%d\n",litmus_clock(),aConvertValue,bConvertValue,outerIndex,clusterID); 
+			//
 
 			//Calculate the total utilization. 
 			localTotalUtilization+=weightLevel[outerIndex];			
 		}
+		
+		//
+// 		aConvertValue = localTotalUtilization*10000;
+// 		TRACE(",,,,,,time,%llu,BEFORE:Reweighting:EstimatedClusterUtilization10000,%d,clusterID,%d\n",litmus_clock(),aConvertValue,clusterID); 
+		//
 		
 		//Step 2 : Increase tasks from top to lowest_priorty_cpu()
 		//Since all tasks are in sorted order at service level 0
@@ -884,9 +900,14 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 				//The value the weight would be if we increased the weight of the task
 				calculationFactor = weightLevel[outerIndex] * tsk_rt(local_copy[outerIndex])->task_params.service_levels[innerIndex].relative_work;
 				
+				//
+// 				aConvertValue = calculationFactor*10000;
+// 				TRACE(",,,,,,time,%llu,task,%d,ServiceLevel,%d,CalculatedWeight10000,%d,clusterID,%d\n",litmus_clock(),outerIndex,innerIndex,aConvertValue,clusterID);
+				//
 				
 				//If we increased it, would the system be over utilized?
-				if( (localTotalUtilization-weightLevel[outerIndex]+calculationFactor) < maxUtilization) {
+				// MARK ALPHA 
+				if( (calculationFactor<MAX_CPUS_UTIL) && ((localTotalUtilization-weightLevel[outerIndex]+calculationFactor) < maxUtilization)) {
 					//Increasing the weight of the task
 					taskLevel[outerIndex] = innerIndex;
 				}
@@ -900,12 +921,29 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 // 			}
 		
 		}
+		//
+		aConvertValue = localTotalUtilization*10000;
+		TRACE(",,,,,,time,%llu,AFTER:Reweighting:EstimatedClusterUtilization10000,%d,clusterID,%d\n",litmus_clock(),aConvertValue,clusterID); 
+		for(outerIndex=0; outerIndex < number_of_tasks_on_cluster; outerIndex++) {
+			TRACE(",,,,,,time,%llu,AFTER:LEVEL is,%d,clusterID,%d\n",litmus_clock(),taskLevel[outerIndex], clusterID);
+		}
+		//
 		
 		// Go through and actually change the weight of each task now that all the work is done.
 		acedf_cluster_total_QoS[clusterID] = 0.0;
+
+
 		for(outerIndex=0; outerIndex < number_of_tasks_on_cluster; outerIndex++) {
-			tsk_rt(local_copy[outerIndex])->ctrl_page->service_level = taskLevel[outerIndex];
+
+			// TESTING *************
+// 			if(outerIndex>=8){
+// 				local_copy[outerIndex]->rt_param.task_params.target_service_level = 0;
+// 			}
+			// TESTING *************
+			//Change the service level to be the target_service_level
+			local_copy[outerIndex]->rt_param.task_params.target_service_level = taskLevel[outerIndex];
 			acedf_cluster_total_QoS[clusterID] += tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].quality_of_service;
+
 		}
 		
 		//Now, determine if we need to repartition. 
@@ -922,38 +960,39 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 			}
 		} 
 		
-		// TODO: Reinsert condition for trigger Removed for testing purposes. 
+
 		if ((min_qos > 0) && (max_qos > 0)  && ((max_qos/min_qos) > repartition_trigger)  && ( (lastRepartitionTime_acedf + nanosecondsBetweenRepartitions_acedf) < litmus_clock())) {
 			
-			//TODO: Acquire locks
+	
 			//We check this value twice to make sure that we aren't trying to repartition twice back to back
 			//The first check (pre-locks) gets ride of most of the request
 			//This check provents race conditions
 	
+			/* release your own lock */
 			raw_spin_unlock(&acedf[clusterID].secondary_lock);
 	
-			//reaquire all the locks
+			/* aquire all the locks IN ORDER */
 			for(i =0; i< acedf_number_of_clusters; i++ ){
 				raw_spin_lock(&acedf[i].secondary_lock);
 			}
 	
-			
-	
-	//release all the locks
 
 
+		
 			if ((lastRepartitionTime_acedf + nanosecondsBetweenRepartitions_acedf) < litmus_clock()){
 				lastRepartitionTime_acedf = litmus_clock();
 				repartition_tasks_acedf(clusterID);
 			} 
 			
+			/* release all locks except the one for this cluster */
 			for(i =0; i< acedf_number_of_clusters; i++ ){
 				if (i !=clusterID ){
 					raw_spin_unlock(&acedf[i].secondary_lock);
 				}
 			}
 		
-		}		
+		}
+		
 		
 	}	
 }
@@ -1036,18 +1075,15 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	t->rt_param.job_params.estimated_weight = 
 		((double) get_estimated_exec_time(t))/get_rt_relative_deadline(t);
 	
-	//TODO: Make a flag for the scheduler base on whether service levels are adjusted
-	//based on time or trigger level. 
+	TRACE(",,,,,time,%llu,EstExcTime,%llu%,RelativeDealine,%llu\n",litmus_clock(),get_estimated_exec_time(t),get_rt_relative_deadline(t));
 	
 	/* The change in the estimated_weight of this job must be added to the total 
 	 * utilization
-	 */
- 
+	 */ 
 	difference_in_weight = get_estimated_weight(t) - old_est_weight;
 
 	
 	acedf_cluster_total_utilization[cluster_id] += difference_in_weight;
-	
 	//Trace TODO. This is the primary Trace I need to improve it 
 
 	//tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].quality_of_service
@@ -1068,15 +1104,6 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	tsk_rt(t)->ctrl_page->service_level,
 	(int)(tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].quality_of_service*1000),
 	(int)(acedf_cluster_total_QoS[task_cpu_cluster(t)->clusterID]*1000), job_no);
-	// TODO: Consolidate
-// 	TRACE("***TASK SERVICE LEVEL :%u\n",tsk_rt(t)->ctrl_page->service_level);
-// 	TRACE("A-GSN-EDF-Period: %llu\n", tsk_rt(t)->task_params.period);
-// 	TRACE("A-GSN-EDF-Deadline: %llu\n", tsk_rt(t)->task_params.relative_deadline);
-				//aConvertValue is just a temp used for tracing
-// 				aConvertValue = 10000*get_estimated_weight(local_copy[outerIndex]);
-// 				TRACE("-LEVEL 0: Task %d, weight %d\n", outerIndex, aConvertValue);
-//			TRACE("The total qos on index %d is %d\n", outerIndex, (int)(acedf_cluster_total_QoS[outerIndex]*100));
-
 
 
 		
@@ -1091,6 +1118,7 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	
 	triggerReweightNow = 0;
 	
+	
 	// TODO: maxUtilization is different than number of cpus because you need to focus
 	// on the cluster_size
 	maxUtilization = cluster_size - bufferCPUs;
@@ -1098,29 +1126,36 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	if( acedf_cluster_total_utilization[cluster_id]  > maxUtilization) {
 		triggerReweightNow = 1;
 		largeWeight = 10000*acedf_cluster_total_utilization[cluster_id];
+		//
 		TRACE(",,,,,time,%llu,REWEIGHTOVER10000,%d,\n",litmus_clock(), largeWeight);
+		//
 	}
 	
-	
-// 	for(i =0; i< acedf_number_of_clusters; i++ ){
-// 	if (acedf_cluster_total_utilization[cluster_id] > acedf_cluster_max_utilization) { 
-// 		triggerReweightNow = 1;
-// 	}
-// 	}
-
-	
+	//Mark Alpha
+	if (get_estimated_weight(t) > MAX_CPUS_UTIL) {
+		//
+		TRACE(",,,,,time,%llu,SINGLE_OVER,%d,\n",litmus_clock(), get_estimated_weight(t));
+		//
+		triggerReweightNow = 1;
+	}
 	
 	//trigger because a task changed its weight by too much
 	if( (get_estimated_weight(t) > old_est_weight*(1+PERCENT_CHANGE_TRIGGER)) ||
 		(get_estimated_weight(t) < old_est_weight*(1-PERCENT_CHANGE_TRIGGER)))
 	{
 		triggerReweightNow = 1;
+		//
+		TRACE(",,,,,time,%llu,TRIGGER PER TASK\n",litmus_clock());
+		//
 	}
 	
 	//trigger because enough time has passed
 	if ( (lastReweightTime_acedf[task_cpu_cluster(t)->clusterID] + nanosecondsBetweenReweights_acedf) < litmus_clock()){
 		triggerReweightNow = 1;
 		lastReweightTime_acedf[task_cpu_cluster(t)->clusterID] = litmus_clock();
+		//
+		TRACE(",,,,,time,%llu,TRIGGER TIME\n",litmus_clock());
+		//
 		
 	}
 
@@ -1131,6 +1166,9 @@ static noinline int job_completion(struct task_struct *t, int forced)
 // 		}
 		triggerReweightNow = 0;
 	}
+	
+
+	
 	adjust_all_service_levels_acedf(triggerReweightNow,cluster_id);
 	
 

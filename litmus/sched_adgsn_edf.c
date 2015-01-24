@@ -1,5 +1,7 @@
-//TODO: Remove any bugs that might occur by ovverunns
-//TODO: Clean up code to get rid of locking from "coppying" GSN-EDF
+// Change to back integrates
+// 1. prevent tasks from going over 100% utilization in reweighting code Marked by ALPHA)
+
+
 /*
  * litmus/sched_adgsn_edf.c
  *
@@ -135,7 +137,7 @@ static int currentNumberTasks;
 
 static double agsnedf_total_utilization;
 
-static const lt_t nanosecondsBetweenReweights = 1000000000/20; //Number of times per second that the system is weighted at a minimum;
+static const lt_t nanosecondsBetweenReweights = 1000000000/5; //Number of times per second that the system is weighted at a minimum;
 static lt_t lastReweightTime; //time used to keep track of the last time the task was reweighted
 static lt_t initialStartTime;//Time the first task starts
 static lt_t initialStableWindowTime=((lt_t)10)*((lt_t)1000000000); //For the first 30 seconds, nothing happens. 
@@ -428,7 +430,7 @@ static noinline void adjust_all_service_levels(int triggerNow){
 	double localTotalUtilization = 0;
 	double maxUtilization = num_online_cpus()-number_of_cpus_held_back;
 	//This is the max_level 
-	const int max_level = 2; //max level should be 3, but crashing. So let's try 2
+	const int max_level = 3; //max level should be 3, but crashing. So let's try 2
 	const int lowest_level = 0; //lowest service level level should be 3, but crashing. So let's try 2
 	double calculationFactor;
 	
