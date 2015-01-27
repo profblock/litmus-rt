@@ -8,11 +8,8 @@
 
 static inline void setup_release(struct task_struct *t, lt_t release)
 {
-	int relative_work;
-	int control1;
-	int control2;
-	unsigned int oldJob;
-	int serviceLevel = tsk_rt(t)->ctrl_page->service_level;
+
+	int serviceLevel; 
 	/* prepare next release */
 	t->rt_param.job_params.release = release;
 		
@@ -20,18 +17,14 @@ static inline void setup_release(struct task_struct *t, lt_t release)
 	 * determined  by the current service level. 
 	 */
 	if (get_service_levels(t))  {
+		serviceLevel = tsk_rt(t)->ctrl_page->service_level;
 		struct rt_service_level current_service_level = 
 			get_service_levels(t)[serviceLevel];
 		//tsk_rt(t)->job_params.current_service_level
 		//tsk_rt(t)->ctrl_page->service_level
 		lt_t relative_deadline = current_service_level.service_level_period;
 		//TODO: Remove printing
-		relative_work = (int)(1000*current_service_level.relative_work);
-		control1 = serviceLevel;
-		control2 = current_service_level.service_level_number;
-		//TRACE_TASK(t, "service level %d, level's service: %d,  relative work %d\n", control1, control2, relative_work);
-		//TRACE_TASK(t, "Changing relative_deadline from %llu to %llu. Other %llu\n",t->rt_param.task_params.relative_deadline, relative_deadline, get_rt_relative_deadline(t));
-		//TRACE("Setup_release 2 : %d\n", tsk_rt(t)->ctrl_page->service_level);
+
 		t->rt_param.task_params.relative_deadline = relative_deadline;
 		t->rt_param.task_params.period = relative_deadline;
 		
@@ -48,19 +41,11 @@ static inline void setup_release(struct task_struct *t, lt_t release)
 	} else {
 		TRACE("No service levels defined\n");
 	}
-	//TRACE("Setup_release 4 : %d\n", tsk_rt(t)->ctrl_page->service_level);
 	t->rt_param.job_params.deadline = release + get_rt_relative_deadline(t);
-// 	TRACE_TASK(t, "Relative Deadline %llu\n",
-// 			   get_rt_relative_deadline(t));
-// 	TRACE_TASK(t, "Absolute Deadline %llu\n",
-// 			   t->rt_param.job_params.deadline);
 	t->rt_param.job_params.exec_time = 0;
 
-	//TRACE("Setup_release 5 : %d\n", tsk_rt(t)->ctrl_page->service_level);
 	/* update job sequence number */
-	oldJob = t->rt_param.job_params.job_no;
 	t->rt_param.job_params.job_no++;
-	TRACE_TASK(t,",,,,Old Job: %u, new Job %u\n", oldJob,t->rt_param.job_params.job_no );
 }
 
 void prepare_for_next_period(struct task_struct *t)

@@ -32,8 +32,8 @@ void sched_state_will_schedule(struct task_struct* tsk)
 		 * set_tsk_need_resched(). */
 		BUG_ON(is_realtime(tsk));
 #ifdef CONFIG_PREEMPT_STATE_TRACE
-	TRACE_TASK(tsk, "set_tsk_need_resched() ret:%p\n",
-		   __builtin_return_address(0));
+/*	TRACE_TASK(tsk, "set_tsk_need_resched() ret:%p\n",
+		   __builtin_return_address(0)); */
 #endif
 }
 
@@ -46,14 +46,14 @@ void sched_state_ipi(void)
 		/* Cause scheduler to be invoked.
 		 * This will cause a transition to WILL_SCHEDULE. */
 		set_tsk_need_resched(current);
-		TRACE_STATE("IPI -> set_tsk_need_resched(%s/%d)\n",
-			    current->comm, current->pid);
+/*		TRACE_STATE("IPI -> set_tsk_need_resched(%s/%d)\n",
+			    current->comm, current->pid); */
 		TS_SEND_RESCHED_END;
 	} else {
 		/* ignore */
-		TRACE_STATE("ignoring IPI in state %x (%s)\n",
+/*		TRACE_STATE("ignoring IPI in state %x (%s)\n",
 			    get_sched_state(),
-			    sched_state_name(get_sched_state()));
+			    sched_state_name(get_sched_state())); */
 	}
 }
 
@@ -93,10 +93,10 @@ void litmus_reschedule(int cpu)
 		}
 	}
 
-	TRACE_STATE("%s picked-ok:%d sched-ok:%d\n",
+/*	TRACE_STATE("%s picked-ok:%d sched-ok:%d\n",
 		    __FUNCTION__,
 		    picked_transition_ok,
-		    scheduled_transition_ok);
+		    scheduled_transition_ok);*/
 }
 
 void litmus_reschedule_local(void)

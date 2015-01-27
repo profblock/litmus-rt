@@ -72,7 +72,7 @@ static inline int cpu_is_in_sched_state(int cpu, int possible_states)
 
 static inline void set_sched_state(sched_state_t s)
 {
-	TRACE_SCHED_STATE_CHANGE(get_sched_state(), s, smp_processor_id());
+	//TRACE_SCHED_STATE_CHANGE(get_sched_state(), s, smp_processor_id());
 	atomic_set(&__get_cpu_var(resched_state), s);
 }
 
@@ -82,7 +82,7 @@ static inline int sched_state_transition(sched_state_t from, sched_state_t to)
 
 	old_state = atomic_cmpxchg(&__get_cpu_var(resched_state), from, to);
 	if (old_state == from) {
-		TRACE_SCHED_STATE_CHANGE(from, to, smp_processor_id());
+		//TRACE_SCHED_STATE_CHANGE(from, to, smp_processor_id());
 		return 1;
 	} else
 		return 0;
@@ -96,7 +96,7 @@ static inline int sched_state_transition_on(int cpu,
 
 	old_state = atomic_cmpxchg(&per_cpu(resched_state, cpu), from, to);
 	if (old_state == from) {
-		TRACE_SCHED_STATE_CHANGE(from, to, cpu);
+		//TRACE_SCHED_STATE_CHANGE(from, to, cpu);
 		return 1;
 	} else
 		return 0;
