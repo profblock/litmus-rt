@@ -55,6 +55,7 @@
 
 #include <float.h>
 
+
 /* Reference configuration variable. Determines which cache level is used to
  * group CPUs into clusters.  GLOBAL_CLUSTER, which is the default, means that
  * all CPUs form a single cluster (just like GSN-EDF).
@@ -114,7 +115,7 @@ typedef struct clusterdomain {
 
 static raw_spinlock_t global_lock;
 
-#define NUMBER_OF_WITHELD_CPUS 4
+#define NUMBER_OF_WITHELD_CPUS 0.5
 #define MAX_CPUS_UTIL 0.90 
 
 /* a acedf_domain per cluster; allocation is done at init/activation time */
@@ -704,9 +705,17 @@ static void repartition_tasks_acedf(int clusterID){
 	
 }
 
+// static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int clusterID){
+// 	int acumulator = 0;
+// 	int i = 0;
+// 	for (i = 0; i< 100;i++) {
+// 		acumulator+=all_tasks_acedf[triggerReweightNow]->rt_param.task_params.cpu;
+// 		
+// 	}	
+// 	TRACE("acumulator %d\n", acumulator); 
+// }
 
-//added
-//Should only be called by job_completion. Thus, caller holds adgnedf_lock
+//Should only be called by job_completion. Thus, caller holds its' cluster lock
 static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int clusterID){
 	int count;
 	int i; 
@@ -823,19 +832,7 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 				}
 			}
 		}
-		//Let's validate sorted. 
-		//TODO: Remove this. 
-// 		for(lowerIndex =0; lowerIndex< number_of_tasks_on_cluster;lowerIndex++){
-// 			QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
-// 			estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
-// 					(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
-// 			if (estWeightDiffLower <= 0 ) {
-// 				valueDensityLowerIndex = DBL_MAX;
-// 			} else {
-// 				valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
-// 			}
-// 					
-// 		}
+
 		//Local_copy is now sorted
 		
 		//Now need to maximize
@@ -857,7 +854,6 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 		
 			// If it is 0, then the estimated weight is the correct amount to to add to
 			// localTotalUtiization 
-			// FYI aConvertValue is a temp used for tracing
 			if (tsk_rt(local_copy[outerIndex])->ctrl_page->service_level==0) {
 				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]);
 				
@@ -867,20 +863,12 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 				//we need to calculate it's weight if it were at service level zero. 
 				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]) / tsk_rt(local_copy[outerIndex])->task_params.service_levels[tsk_rt(local_copy[outerIndex])->ctrl_page->service_level].relative_work;				
 			}
-			//
-// 			aConvertValue = get_estimated_weight(local_copy[outerIndex])*10000;
-// 			bConvertValue = weightLevel[outerIndex]*10000;
-// 			TRACE(",,,,,,time,%llu,BEFORE:EstWeight10000,%d,adjustedValue10000,%d,id,%d,clusterID,%d\n",litmus_clock(),aConvertValue,bConvertValue,outerIndex,clusterID); 
-			//
+
 
 			//Calculate the total utilization. 
 			localTotalUtilization+=weightLevel[outerIndex];			
 		}
 		
-		//
-// 		aConvertValue = localTotalUtilization*10000;
-// 		TRACE(",,,,,,time,%llu,BEFORE:Reweighting:EstimatedClusterUtilization10000,%d,clusterID,%d\n",litmus_clock(),aConvertValue,clusterID); 
-		//
 		
 		//Step 2 : Increase tasks from top to lowest_priorty_cpu()
 		//Since all tasks are in sorted order at service level 0
@@ -898,10 +886,7 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 				//The value the weight would be if we increased the weight of the task
 				calculationFactor = weightLevel[outerIndex] * tsk_rt(local_copy[outerIndex])->task_params.service_levels[innerIndex].relative_work;
 				
-				//
-// 				aConvertValue = calculationFactor*10000;
-// 				TRACE(",,,,,,time,%llu,task,%d,ServiceLevel,%d,CalculatedWeight10000,%d,clusterID,%d\n",litmus_clock(),outerIndex,innerIndex,aConvertValue,clusterID);
-				//
+
 				
 				//If we increased it, would the system be over utilized?
 				// MARK ALPHA 
@@ -914,18 +899,10 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 			//Change the total utilization by subtracting the old weight and adding the new weight
 			//We don't actually change the weight here though
 			localTotalUtilization = localTotalUtilization-weightLevel[outerIndex] + weightLevel[outerIndex]* tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].relative_work;
-// 			for(innerIndex = tsk_rt(local_copy[outerIndex])->ctrl_page->service_level; innerIndex < max_level; innerIndex) { 
-// 				
-// 			}
+
 		
 		}
-		//
-		aConvertValue = localTotalUtilization*10000;
-		TRACE(",,,,,,time,%llu,AFTER:Reweighting:EstimatedClusterUtilization10000,%d,clusterID,%d\n",litmus_clock(),aConvertValue,clusterID); 
-		for(outerIndex=0; outerIndex < number_of_tasks_on_cluster; outerIndex++) {
-			TRACE(",,,,,,time,%llu,AFTER:LEVEL is,%d,clusterID,%d\n",litmus_clock(),taskLevel[outerIndex], clusterID);
-		}
-		//
+
 		
 		// Go through and actually change the weight of each task now that all the work is done.
 		acedf_cluster_total_QoS[clusterID] = 0.0;
@@ -933,17 +910,14 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 
 		for(outerIndex=0; outerIndex < number_of_tasks_on_cluster; outerIndex++) {
 
-			// TESTING *************
-// 			if(outerIndex>=8){
-// 				local_copy[outerIndex]->rt_param.task_params.target_service_level = 0;
-// 			}
-			// TESTING *************
 			//Change the service level to be the target_service_level
 			local_copy[outerIndex]->rt_param.task_params.target_service_level = taskLevel[outerIndex];
 			acedf_cluster_total_QoS[clusterID] += tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].quality_of_service;
 
 		}
 		
+		
+		//////////////////////////////////////////
 		//Now, determine if we need to repartition. 
 		min_qos = acedf_cluster_total_QoS[clusterID];
 		max_qos = acedf_cluster_total_QoS[clusterID];
@@ -988,10 +962,7 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 					raw_spin_unlock(&acedf[i].secondary_lock);
 				}
 			}
-		
-		}
-		
-		
+		}	
 	}	
 }
 
