@@ -422,12 +422,10 @@ static void acedf_release_jobs(rt_domain_t* rt, struct bheap* tasks)
 	raw_spin_lock_irqsave(&cluster->cluster_lock, flags);
 	raw_spin_lock_irqsave(&cluster->secondary_lock, flags_secondary);
 
-	TRACE("acquire %d lock:release_jobs \n",cluster->clusterID );
-
 	__merge_ready(&cluster->domain, tasks);
 	check_for_preemptions(cluster);
 
-	TRACE("Releasing %d lock:relase_jobs \n",cluster->clusterID );
+	
 	raw_spin_unlock_irqrestore(&cluster->secondary_lock, flags_secondary);
 	raw_spin_unlock_irqrestore(&cluster->cluster_lock, flags);
 }
@@ -459,7 +457,7 @@ static void repartition_tasks_acedf(int clusterID){
 	struct task_struct *temp;
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
 	// This is how tsk_rt(t)->ctrl_page->service_level;
-	const int number_of_cpus_held_back = NUMBER_OF_WITHELD_CPUS; //Note: On my 12 core (24 virtual processors)
+	const double number_of_cpus_held_back = NUMBER_OF_WITHELD_CPUS; //Note: On my 12 core (24 virtual processors)
 	//If this is under 5, then the system crashes. (Thus, the system runs on 19 virtual cores)
 	struct task_struct* local_copy[currentNumberTasks_acedf];
 	int local_cluster_copy[currentNumberTasks_acedf];
@@ -570,20 +568,20 @@ static void repartition_tasks_acedf(int clusterID){
 	}
 	//Let's validate sorted. 
 	//TODO: Remove this. 
-	for(lowerIndex =0; lowerIndex< currentNumberTasks_acedf;lowerIndex++){
-		QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
-		estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
-				(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
-		if (estWeightDiffLower <= 0 ) {
-			valueDensityLowerIndex = DBL_MAX;
-		} else {
-			valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
-		}
-
-		//TRACE("REPARTITION: Task %i, value Density %d, QoS Diff %d, weightDiff %d, valu\n", lowerIndex,(int)(valueDensityLowerIndex*1000), (int)(QoSLowerIndex*1000), (int)(estWeightDiffLower*1000));
-		
-				
-	}
+// 	for(lowerIndex =0; lowerIndex< currentNumberTasks_acedf;lowerIndex++){
+// 		QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
+// 		estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
+// 				(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
+// 		if (estWeightDiffLower <= 0 ) {
+// 			valueDensityLowerIndex = DBL_MAX;
+// 		} else {
+// 			valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
+// 		}
+// 
+// 		//TRACE("REPARTITION: Task %i, value Density %d, QoS Diff %d, weightDiff %d, valu\n", lowerIndex,(int)(valueDensityLowerIndex*1000), (int)(QoSLowerIndex*1000), (int)(estWeightDiffLower*1000));
+// 		
+// 				
+// 	}
 	//Local_copy is now sorted
 	
 	//Now need to maximize
@@ -715,7 +713,7 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 	struct task_struct *temp;
 	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
 	// This is how tsk_rt(t)->ctrl_page->service_level;
-	const int number_of_cpus_held_back = NUMBER_OF_WITHELD_CPUS; //Note: On my 12 core (24 virtual processors)
+	const double number_of_cpus_held_back = NUMBER_OF_WITHELD_CPUS; //Note: On my 12 core (24 virtual processors)
 	//If this is under 5, then the system crashes. (Thus, the system runs on 19 virtual cores)
 	struct task_struct* local_copy[currentNumberTasks_acedf];
 	int local_cluster_copy[currentNumberTasks_acedf];
@@ -827,17 +825,17 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 		}
 		//Let's validate sorted. 
 		//TODO: Remove this. 
-		for(lowerIndex =0; lowerIndex< number_of_tasks_on_cluster;lowerIndex++){
-			QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
-			estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
-					(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
-			if (estWeightDiffLower <= 0 ) {
-				valueDensityLowerIndex = DBL_MAX;
-			} else {
-				valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
-			}
-					
-		}
+// 		for(lowerIndex =0; lowerIndex< number_of_tasks_on_cluster;lowerIndex++){
+// 			QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
+// 			estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
+// 					(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
+// 			if (estWeightDiffLower <= 0 ) {
+// 				valueDensityLowerIndex = DBL_MAX;
+// 			} else {
+// 				valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
+// 			}
+// 					
+// 		}
 		//Local_copy is now sorted
 		
 		//Now need to maximize
@@ -1008,22 +1006,8 @@ static void acedf_migrate_to(struct task_struct* task_to_migrate, int target_clu
 	acedf_domain_t *oldcluster = task_cpu_cluster(task_to_migrate);
 	int oldClusterID  = oldcluster-> clusterID;
 
-	/* Acquire the global lock first so that we don't cause deadlock */ 
-	//raw_spin_lock_irqsave(&global_lock, flags);
-	
-// 	if (task_to_migrate->rt_param.task_params.cpu !=acedf[target_cluster_id].representative_CPU){
-// 		/*if (target_cluster_id == 0 ) {
-// 			raw_spin_lock(&(acedf[target_cluster_id].cluster_lock)); 
-// 		}*/
-// 	} else {
-// 		TRACE("Task %d is trying to migrate to itself on  %d lock:Schedule \n",task_to_migrate->pid, task_to_migrate->rt_param.task_params.cpu );
-// 	}
-
-
-//	TRACE("ACEDF**&&**: Task , %d, Intially on %d soon to be on %d\n", task_to_migrate->pid, task_cpu_cluster(task_to_migrate)->clusterID, target_cluster_id);
 	task_to_migrate->rt_param.task_params.cpu = acedf[target_cluster_id].representative_CPU;
 	
-	//could cause synchronization issue. 
 	acedf_cluster_total_utilization[target_cluster_id] += get_estimated_weight(task_to_migrate);
 	acedf_cluster_total_utilization[oldClusterID] -= get_estimated_weight(task_to_migrate);
 
@@ -1039,15 +1023,15 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	acedf_domain_t *oldcluster;
 	acedf_domain_t *newcluster;
 
-	//TODO: Change this if I want to trigger a weight change when we have fewer than 2 CPUS left
-	const int bufferCPUs = NUMBER_OF_WITHELD_CPUS; //Note: On my 12 core (24 virtual processors)
+
+	const double bufferCPUs = NUMBER_OF_WITHELD_CPUS; 
 	//If this is under 5, then the system crashes. (Thus, the system runs on 19 virtual cores)
 	double old_est_weight;
 	double difference_in_weight;
 	int triggerReweightNow = 0;
 	int largeWeight = 0;
 	double maxUtilization;
-	int job_no;
+	unsigned int job_no;
 	const double PERCENT_CHANGE_TRIGGER = 0.125; // If the task's weight changes by this percentage
 	// between job releases, then trigger an immediate reweighting
 
@@ -1056,7 +1040,6 @@ static noinline int job_completion(struct task_struct *t, int forced)
 
 	sched_trace_task_completion(t, forced);
 
-//	TRACE_TASK(t, "job_completion().\n");
 	cluster_id = task_cpu_cluster(t)->clusterID;
 	
 	/* set flags */
@@ -1081,12 +1064,8 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	 * utilization
 	 */ 
 	difference_in_weight = get_estimated_weight(t) - old_est_weight;
-
-	
 	acedf_cluster_total_utilization[cluster_id] += difference_in_weight;
-	//Trace TODO. This is the primary Trace I need to improve it 
 
-	//tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].quality_of_service
 	largeWeight = 10000*get_estimated_weight(t);
 	if (largeWeight < 0){
 		TRACE("LARGE WEIGHT IS LESS THAN ZERO %d\n", largeWeight);
@@ -1097,13 +1076,15 @@ static noinline int job_completion(struct task_struct *t, int forced)
 		}
 	}
 	job_no =  t->rt_param.job_params.job_no;
-	TRACE(",,,,,time,%llu,taskID,%d,cluster,%d,estWtTimes10000,%d,serviceLevel,%u,taskQoSTimes1000,%d,TOTALQoSTimes1000,jobNumber,%d\n", litmus_clock(), 
+	TRACE(",,,,,time,%llu,taskID,%d,cluster,%d,estWtTimes10000,%d,serviceLevel,%u,taskQoSTimes1000,%d,TOTALQoSTimes1000,%d,jobNumber,%u\n", 
+	litmus_clock(), 
 	t->pid,
 	task_cpu_cluster(t)->clusterID,
 	largeWeight,
 	tsk_rt(t)->ctrl_page->service_level,
 	(int)(tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].quality_of_service*1000),
-	(int)(acedf_cluster_total_QoS[task_cpu_cluster(t)->clusterID]*1000), job_no);
+	(int)(acedf_cluster_total_QoS[task_cpu_cluster(t)->clusterID]*1000), 
+	job_no);
 
 
 		
@@ -1119,10 +1100,10 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	triggerReweightNow = 0;
 	
 	
-	// TODO: maxUtilization is different than number of cpus because you need to focus
-	// on the cluster_size
+
 	maxUtilization = cluster_size - bufferCPUs;
-	//Trigger because the system is too utilized
+
+	/* Trigger because the system is too utilized */
 	if( acedf_cluster_total_utilization[cluster_id]  > maxUtilization) {
 		triggerReweightNow = 1;
 		largeWeight = 10000*acedf_cluster_total_utilization[cluster_id];
@@ -1161,24 +1142,20 @@ static noinline int job_completion(struct task_struct *t, int forced)
 
 	// if we aren't past the initial window, then don't reweight
 	if((initialStartTime_acedf+initialStableWindowTime_acedf) > litmus_clock()){
-// 		if(triggerReweightNow==1){
-// 			TRACE("Still to early. Nothing until %llu, now %llu\n", initialStartTime_acedf+initialStableWindowTime_acedf, litmus_clock());
-// 		}
 		triggerReweightNow = 0;
 	}
 	
-
-	
 	adjust_all_service_levels_acedf(triggerReweightNow,cluster_id);
 	
-
 	if (tsk_rt(t)->ctrl_page->service_level != t->rt_param.task_params.target_service_level) {
 		tsk_rt(t)->ctrl_page->service_level = t->rt_param.task_params.target_service_level;
 	}
 
+
 	
 	/* prepare for next period */
 	prepare_for_next_period(t);
+	
 	if (is_early_releasing(t) || is_released(t, litmus_clock()))
 		sched_trace_task_release(t);
 	/* unlink */
@@ -1324,8 +1301,7 @@ static struct task_struct* acedf_schedule(struct task_struct * prev)
 		schedule_normal_path = job_completion(entry->scheduled, !sleep);
 
 	if (schedule_normal_path == -1 ){
-		/* Link pending task if we became unlinked.
-		 */
+		/* Link pending task if we became unlinked. */
 		if (!entry->linked)
 			link_task_to_cpu(__take_ready(&cluster->domain), entry);
 
@@ -1342,7 +1318,7 @@ static struct task_struct* acedf_schedule(struct task_struct * prev)
 			if (entry->scheduled) {
 				/* not gonna be scheduled soon */
 				entry->scheduled->rt_param.scheduled_on = NO_CPU;
-				TRACE_TASK(entry->scheduled, "scheduled_on = NO_CPU\n");
+				//TRACE_TASK(entry->scheduled, "scheduled_on = NO_CPU\n");
 			}
 		} else
 			/* Only override Linux scheduler if we have a real-time task
@@ -1352,7 +1328,7 @@ static struct task_struct* acedf_schedule(struct task_struct * prev)
 				next = prev;
 
 		sched_state_task_picked();
-		TRACE("Releasing %d lock:Schedule \n",cluster->clusterID );
+		//TRACE("Releasing %d lock:Schedule \n",cluster->clusterID );
 		raw_spin_unlock(&cluster->secondary_lock);
 		raw_spin_unlock(&cluster->cluster_lock);
 	} else { // We run this path if we migrate a task between processors
@@ -1373,7 +1349,7 @@ static struct task_struct* acedf_schedule(struct task_struct * prev)
 			if (entry->scheduled) {
 				/* not gonna be scheduled soon */
 				entry->scheduled->rt_param.scheduled_on = NO_CPU;
-				TRACE_TASK(entry->scheduled, "scheduled_on = NO_CPU\n");
+				//TRACE_TASK(entry->scheduled, "scheduled_on = NO_CPU\n");
 			}
 		} else
 			/* Only override Linux scheduler if we have a real-time task
@@ -1383,7 +1359,7 @@ static struct task_struct* acedf_schedule(struct task_struct * prev)
 				next = prev;
 
 		sched_state_task_picked();  
-		TRACE("Releasing %d lock:Schedule \n",cluster->clusterID );
+		//TRACE("Releasing %d lock:Schedule \n",cluster->clusterID );
 		//TODO change the cluster we are scheduling on 
 		raw_spin_unlock(&acedf[schedule_normal_path].secondary_lock);
 		raw_spin_unlock(&cluster->secondary_lock);
@@ -1437,7 +1413,7 @@ static void acedf_task_new(struct task_struct * t, int on_rq, int is_scheduled)
 
 	raw_spin_lock_irqsave(&cluster->cluster_lock, flags);
 	raw_spin_lock_irqsave(&cluster->secondary_lock, flags_secondary);
-	TRACE("Acquire %d lock:new \n",cluster->clusterID );
+	
 
 	localNumber = currentNumberTasks_acedf; 
 	all_tasks_acedf[currentNumberTasks_acedf] = t;
@@ -1484,7 +1460,7 @@ static void acedf_task_new(struct task_struct * t, int on_rq, int is_scheduled)
 	
 	if (is_running(t))
 		acedf_job_arrival(t);
-	TRACE("Releasing %d lock:New \n",cluster->clusterID );
+	
 	raw_spin_unlock_irqrestore(&cluster->secondary_lock, flags_secondary);
 	raw_spin_unlock_irqrestore(&(cluster->cluster_lock), flags);
 }
@@ -1496,13 +1472,13 @@ static void acedf_task_wake_up(struct task_struct *task)
 	lt_t now;
 	acedf_domain_t *cluster;
 
-	TRACE_TASK(task, "wake_up at %llu\n", litmus_clock());
+	//TRACE_TASK(task, "wake_up at %llu\n", litmus_clock());
 
 	cluster = task_cpu_cluster(task);
 
 	raw_spin_lock_irqsave(&cluster->cluster_lock, flags);
 	raw_spin_lock_irqsave(&cluster->secondary_lock, flags_secondary);
-	TRACE("acquire %d lock:wake \n",cluster->clusterID );
+	
 	now = litmus_clock();
 	if (is_sporadic(task) && is_tardy(task, now)) {
 		/* new sporadic release */
@@ -1510,7 +1486,7 @@ static void acedf_task_wake_up(struct task_struct *task)
 		sched_trace_task_release(task);
 	}
 	acedf_job_arrival(task);
-	TRACE("Releasing %d lock:wake \n",cluster->clusterID );
+
 	raw_spin_unlock_irqrestore(&cluster->secondary_lock, flags_secondary);
 	raw_spin_unlock_irqrestore(&cluster->cluster_lock, flags);
 }
@@ -1529,9 +1505,9 @@ static void acedf_task_block(struct task_struct *t)
 	raw_spin_lock_irqsave(&cluster->cluster_lock, flags);
 	raw_spin_lock_irqsave(&cluster->secondary_lock, flags_secondary);
 
-	TRACE("Acquire %d lock:Block \n",cluster->clusterID );
+	
 	unlink(t);
-	TRACE("Releasing %d lock:Block \n",cluster->clusterID );
+	
 	raw_spin_unlock_irqrestore(&cluster->secondary_lock, flags_secondary);
 	raw_spin_unlock_irqrestore(&cluster->cluster_lock, flags);
 
@@ -1549,7 +1525,7 @@ static void acedf_task_exit(struct task_struct * t)
 	raw_spin_lock_irqsave(&cluster->cluster_lock, flags);
 	raw_spin_lock_irqsave(&cluster->secondary_lock, flags_secondary);
 
-	TRACE("Acquire %d lock:exit \n",cluster->clusterID );
+	
 	unlink(t);
 	if (tsk_rt(t)->scheduled_on != NO_CPU) {
 		cpu_entry_t *cpu;
@@ -1557,7 +1533,6 @@ static void acedf_task_exit(struct task_struct * t)
 		cpu->scheduled = NULL;
 		tsk_rt(t)->scheduled_on = NO_CPU;
 	}
-	TRACE("Releasing %d lock:exit \n",cluster->clusterID );
 	raw_spin_unlock_irqrestore(&cluster->secondary_lock, flags_secondary);
 	raw_spin_unlock_irqrestore(&cluster->cluster_lock, flags);
 
