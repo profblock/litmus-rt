@@ -61,6 +61,7 @@
  * all CPUs form a single cluster (just like GSN-EDF).
  */
 static enum cache_level cluster_config = L3_CLUSTER;
+//static enum cache_level cluster_config = GLOBAL_CLUSTER;
 
 struct clusterdomain;
 
@@ -1000,6 +1001,7 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	double difference_in_weight;
 	int triggerReweightNow = 0;
 	int largeWeight = 0;
+	int totalUtil = 0;
 	double maxUtilization;
 	unsigned int job_no;
 	const double PERCENT_CHANGE_TRIGGER = 0.125; // If the task's weight changes by this percentage
@@ -1036,8 +1038,9 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	acedf_cluster_total_utilization[cluster_id] += difference_in_weight;
 
 	largeWeight = 10000*get_estimated_weight(t);
+	totalUtil = 10000*acedf_cluster_total_utilization[cluster_id];
 	job_no =  t->rt_param.job_params.job_no;
-	TRACE(",,,,,time,%llu,taskID,%d,cluster,%d,estWtTimes10000,%d,serviceLevel,%u,taskQoSTimes1000,%d,TOTALQoSTimes1000,%d,jobNumber,%u\n", 
+	TRACE(",,,,,time,%llu,taskID,%d,cluster,%d,estWtTimes10000,%d,serviceLevel,%u,taskQoSTimes1000,%d,TOTALQoSTimes1000,%d,jobNumber,%u,totalUtil10000,%d\n", 
 	litmus_clock(), 
 	t->pid,
 	task_cpu_cluster(t)->clusterID,
@@ -1045,7 +1048,8 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	tsk_rt(t)->ctrl_page->service_level,
 	(int)(tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].quality_of_service*1000),
 	(int)(acedf_cluster_total_QoS[task_cpu_cluster(t)->clusterID]*1000), 
-	job_no);
+	job_no,
+	totalUtil );
 
 
 		
