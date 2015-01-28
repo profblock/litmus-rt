@@ -720,8 +720,7 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 	int count;
 	int i; 
 	struct task_struct *temp;
-	//TODO: Adjust all the service levels of all the jobs if a trigger threshold is met.
-	// This is how tsk_rt(t)->ctrl_page->service_level;
+
 	const double number_of_cpus_held_back = NUMBER_OF_WITHELD_CPUS; //Note: On my 12 core (24 virtual processors)
 	//If this is under 5, then the system crashes. (Thus, the system runs on 19 virtual cores)
 	struct task_struct* local_copy[currentNumberTasks_acedf];
@@ -759,8 +758,8 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 	//Improve the conditions here so it's time based not task release based. 
 	//changeNow_acedf is used to change only once at the beginning
 	//changeNow_acedf=1;
-	if( triggerReweightNow!=0 /*&& changeNow_acedf==0*/) { 
-		//changeNow_acedf=1;
+	if( triggerReweightNow!=0 ) { 
+		
 		//Copying array to local copy
 		for(count = 0;count < currentNumberTasks_acedf; count++) {
 			if ( all_tasks_acedf[count]->rt_param.task_params.cpu == representative_CPU) {
@@ -1029,7 +1028,6 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	t->rt_param.job_params.estimated_weight = 
 		((double) get_estimated_exec_time(t))/get_rt_relative_deadline(t);
 	
-	TRACE(",,,,,time,%llu,EstExcTime,%llu%,RelativeDealine,%llu\n",litmus_clock(),get_estimated_exec_time(t),get_rt_relative_deadline(t));
 	
 	/* The change in the estimated_weight of this job must be added to the total 
 	 * utilization
@@ -1038,14 +1036,6 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	acedf_cluster_total_utilization[cluster_id] += difference_in_weight;
 
 	largeWeight = 10000*get_estimated_weight(t);
-	if (largeWeight < 0){
-		TRACE("LARGE WEIGHT IS LESS THAN ZERO %d\n", largeWeight);
-		TRACE("SMALL WEIGHT %d\n", (int)(get_estimated_weight(t)*100));
-		TRACE("SMALLest WEIGHT %d\n", (int)(get_estimated_weight(t)*10));
-		if (get_estimated_weight(t)<0){
-			TRACE("Estimated weight is also less than zero");
-		}
-	}
 	job_no =  t->rt_param.job_params.job_no;
 	TRACE(",,,,,time,%llu,taskID,%d,cluster,%d,estWtTimes10000,%d,serviceLevel,%u,taskQoSTimes1000,%d,TOTALQoSTimes1000,%d,jobNumber,%u\n", 
 	litmus_clock(), 
