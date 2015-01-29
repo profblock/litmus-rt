@@ -113,6 +113,8 @@ struct rt_task {
 	
 	/* The service level that the task will change to next time */
 	unsigned int	target_service_level;	
+	
+	int sorted_list_index;
 };
 
 union np_flag {

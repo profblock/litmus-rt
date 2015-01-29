@@ -134,6 +134,7 @@ acedf_domain_t *acedf;
 
 #define MAX_CLUSTERS 100
 #define MAX_TASKS 500
+#define ACEDF_MAX_SERVICE_LEVEL 3
 
 //TODO-AARON: The number here limits the number of real time threads. 
 //Need to make this more general or fix
@@ -146,6 +147,9 @@ static int target_cluster_tasks[MAX_TASKS];
 //of tasks in the system and add them to the task_struct. 
 static int currentNumberTasks_acedf;
 
+//Mark Beta
+static double all_ratios[MAX_TASKS];
+static double total_min_weight;
 
 //TODO-AARON: This only works with 100 clusters. 
 static double acedf_cluster_total_utilization[MAX_CLUSTERS]; 
@@ -486,8 +490,8 @@ static void repartition_tasks_acedf(int clusterID){
 	double maxUtilization = cluster_size-number_of_cpus_held_back;
 	//This is the max_level 
 	//If repartition_trigger is at most 1.0, then it will never have any impact. 
-	const int max_level = 3; //max level should be 3, but crashing. So let's try 2
-	const int lowest_level = 0; //lowest service level level should be 3, but crashing. So let's try 2
+	const int max_level = ACEDF_MAX_SERVICE_LEVEL; //max level should be 3, but crashing. So let's try 2
+	const int lowest_level = 0; 
 	double calculationFactor;
 	int number_of_tasks_on_cluster = 0;
 	double min_qos;
@@ -747,7 +751,7 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 	//This is the max_level 
 	//If repartition_trigger is at most 1.0, then it will never have any impact. 
 	const double repartition_trigger = 1.25; // TODO: Change this to a real value
-	const int max_level = 3; //max level should be 3, but crashing. So let's try 2
+	const int max_level = ACEDF_MAX_SERVICE_LEVEL; //max level should be 3, but crashing. So let's try 2
 	const int lowest_level = 0; //lowest service level level should be 3, but crashing. So let's try 2
 	double calculationFactor;
 	int number_of_tasks_on_cluster = 0;

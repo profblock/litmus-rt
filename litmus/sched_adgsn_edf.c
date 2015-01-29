@@ -128,18 +128,32 @@ static struct bheap      adgsnedf_cpu_heap;
 
 #define NUMBER_OF_WITHELD_CPUS_ADGEDF 5
 #define MAX_CPUS_UTIL_ADGEDF 0.90 
+#define MAX_SERVICE_LEVEL_AGEDF 3
+#define MAX_TASKS_AGEDF 100
 
 //TODO-AARON: The number here limits the number of real time threads. 
 //Need to make this more general or fix
 //Should make this linked list to be more general and flexible
-static struct task_struct* all_tasks[100]; 
+static struct task_struct* all_tasks[MAX_TASKS_AGEDF]; 
+
+
+//Mark Beta
+
+struct agedf_ratio_struct {
+	double ratio;
+	struct task_struct* task; 
+};
+
+
+static struct agedf_ratio_struct adgsnedf_all_ratios[MAX_TASKS_AGEDF];
+static double adgsnedf_total_min_weight;
 
 //TODO-AARON: This is part of the hacky fix above used to keep track of the number
 //of tasks in the system and add them to the task_struct. 
 static int currentNumberTasks;
 
 static double agsnedf_total_utilization;
-static double acedf_total_QoS;
+static double adgsnedf_total_QoS;
 
 static const lt_t nanosecondsBetweenReweights = 1000000000/4; //Number of times per second that the system is weighted at a minimum;
 static lt_t lastReweightTime; //time used to keep track of the last time the task was reweighted
@@ -436,11 +450,14 @@ static noinline void adjust_all_service_levels(int triggerNow){
 	const int lowest_level = 0; //lowest service level level should be 3, but crashing. So let's try 2
 	double calculationFactor;
 	
+	int REMOVEME;
+	
 	//Improve the conditions here so it's time based not task release based. 
 	if( triggerNow!=0 ) { 
 		//Copying array to local copy
 		for(count = 0;count < currentNumberTasks; count++) {
-			local_copy[count] = all_tasks[count];
+			local_copy[count] = adgsnedf_all_ratios[count].task;
+			weightLevel[count] = get_estimated_weight(local_copy[count]) / tsk_rt(local_copy[count])->task_params.service_levels[tsk_rt(local_copy[count])->ctrl_page->service_level].relative_work;
 		}
 	
 
@@ -449,63 +466,63 @@ static noinline void adjust_all_service_levels(int triggerNow){
 		// specifically formula 6.11 on page 258
 		// you can get Aaron's dissertation here: http://cs.unc.edu/~block/aarondiss.pdf
 		
-		for(outerIndex = 1; outerIndex <= currentNumberTasks - 1 ; outerIndex++) {
-			innerIndex = outerIndex;
-		
-			upperIndex = innerIndex;
-			lowerIndex = upperIndex-1;
-			QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[upperIndex])->task_params.service_levels[lowest_level].quality_of_service;
-			QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
-
-			estWeightDiffUpper = (get_estimated_weight(local_copy[upperIndex])/tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].relative_work) * 
-			(tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].relative_work - 1 );
-			if (estWeightDiffUpper <= 0 ) {
-				valueDensityUpperIndex = DBL_MAX;
-			} else {
-				valueDensityUpperIndex =  QoSUpperIndex / estWeightDiffUpper;
-			}
-		
-			estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
-			(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
-			if (estWeightDiffLower <= 0 ) {
-				valueDensityLowerIndex = DBL_MAX;
-			} else {
-				valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
-			}
-
-
-			while (innerIndex > 0 && ( valueDensityUpperIndex > valueDensityLowerIndex)){
-
-				temp = local_copy[upperIndex];
-				local_copy[upperIndex] = local_copy[lowerIndex];
-				local_copy[lowerIndex] = temp;
-			
-				innerIndex--;
-				if (innerIndex > 0 ) {
-					upperIndex = innerIndex;
-					lowerIndex = upperIndex-1;
-			
-					QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[upperIndex])->task_params.service_levels[lowest_level].quality_of_service;
-					QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
-
-					estWeightDiffUpper = (get_estimated_weight(local_copy[upperIndex])/tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].relative_work) * 
-					(tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].relative_work - 1 );
-					if (estWeightDiffUpper <= 0 ) {
-						valueDensityUpperIndex = DBL_MAX;
-					} else {
-						valueDensityUpperIndex =  QoSUpperIndex / estWeightDiffUpper;
-					}
-		
-					estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
-					(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
-					if (estWeightDiffLower <= 0 ) {
-						valueDensityLowerIndex = DBL_MAX;
-					} else {
-						valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
-					}
-				}
-			}
-		}
+// 		for(outerIndex = 1; outerIndex <= currentNumberTasks - 1 ; outerIndex++) {
+// 			innerIndex = outerIndex;
+// 		
+// 			upperIndex = innerIndex;
+// 			lowerIndex = upperIndex-1;
+// 			QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[upperIndex])->task_params.service_levels[lowest_level].quality_of_service;
+// 			QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
+// 
+// 			estWeightDiffUpper = (get_estimated_weight(local_copy[upperIndex])/tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].relative_work) * 
+// 			(tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].relative_work - 1 );
+// 			if (estWeightDiffUpper <= 0 ) {
+// 				valueDensityUpperIndex = DBL_MAX;
+// 			} else {
+// 				valueDensityUpperIndex =  QoSUpperIndex / estWeightDiffUpper;
+// 			}
+// 		
+// 			estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
+// 			(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
+// 			if (estWeightDiffLower <= 0 ) {
+// 				valueDensityLowerIndex = DBL_MAX;
+// 			} else {
+// 				valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
+// 			}
+// 
+// 
+// 			while (innerIndex > 0 && ( valueDensityUpperIndex > valueDensityLowerIndex)){
+// 
+// 				temp = local_copy[upperIndex];
+// 				local_copy[upperIndex] = local_copy[lowerIndex];
+// 				local_copy[lowerIndex] = temp;
+// 			
+// 				innerIndex--;
+// 				if (innerIndex > 0 ) {
+// 					upperIndex = innerIndex;
+// 					lowerIndex = upperIndex-1;
+// 			
+// 					QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[upperIndex])->task_params.service_levels[lowest_level].quality_of_service;
+// 					QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
+// 
+// 					estWeightDiffUpper = (get_estimated_weight(local_copy[upperIndex])/tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].relative_work) * 
+// 					(tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].relative_work - 1 );
+// 					if (estWeightDiffUpper <= 0 ) {
+// 						valueDensityUpperIndex = DBL_MAX;
+// 					} else {
+// 						valueDensityUpperIndex =  QoSUpperIndex / estWeightDiffUpper;
+// 					}
+// 		
+// 					estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
+// 					(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
+// 					if (estWeightDiffLower <= 0 ) {
+// 						valueDensityLowerIndex = DBL_MAX;
+// 					} else {
+// 						valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
+// 					}
+// 				}
+// 			}
+// 		}
 
 		//Local_copy is now sorted
 		
@@ -514,34 +531,32 @@ static noinline void adjust_all_service_levels(int triggerNow){
 		//Step 2 : Increase tasks from top to lowest_priorty_cpu()
 		//Step 3 : taskLevel
 
-		localTotalUtilization = 0;
+		localTotalUtilization = adgsnedf_total_min_weight;
 	
 		//Step 1: set all tasks to their base service level (level 0)
 		//This allows for us to get an assessment of how much "extra" capacity we have
 		
-		for(outerIndex=0; outerIndex < currentNumberTasks; outerIndex++) {
-			//taskLevel corresponds to the calculated desired index for all elements
-			//as sorted by the above. 
-			//Since everything starts off at zero, taskLevel starts at zero.
-			taskLevel[outerIndex] = 0;
-			
+// 		for(outerIndex=0; outerIndex < currentNumberTasks; outerIndex++) {
+// 
+// 			
+// 		
+// 			// If it is 0, then the estimated weight is the correct amount to to add to
+// 			// localTotalUtiization 
+// 			// FYI aConvertValue is a temp used for tracing
+// 			if (tsk_rt(local_copy[outerIndex])->ctrl_page->service_level==0) {
+// 				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]);
+// 								
+// 			} else {
+// 				//If a task has a service level that isn't currently zero, then
+// 				//we need to calculate it's weight if it were at service level zero. 
+// 				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]) / tsk_rt(local_copy[outerIndex])->task_params.service_levels[tsk_rt(local_copy[outerIndex])->ctrl_page->service_level].relative_work;
+// 			}
+// 			
+// 			//Calculate the total utilization. 
+// 			localTotalUtilization+=weightLevel[outerIndex];
+// 		}
 		
-			// If it is 0, then the estimated weight is the correct amount to to add to
-			// localTotalUtiization 
-			// FYI aConvertValue is a temp used for tracing
-			if (tsk_rt(local_copy[outerIndex])->ctrl_page->service_level==0) {
-				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]);
-								
-			} else {
-				//If a task has a service level that isn't currently zero, then
-				//we need to calculate it's weight if it were at service level zero. 
-				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]) / tsk_rt(local_copy[outerIndex])->task_params.service_levels[tsk_rt(local_copy[outerIndex])->ctrl_page->service_level].relative_work;
-			}
-			
-			//Calculate the total utilization. 
-			localTotalUtilization+=weightLevel[outerIndex];
-		}
-		
+
 		//Step 2 : Increase tasks from top to lowest_priorty_cpu()
 		//Since all tasks are in sorted order at service level 0
 		//we start from the first task and attempt to increase its service level 
@@ -551,9 +566,16 @@ static noinline void adjust_all_service_levels(int triggerNow){
 		
 		for(outerIndex=0; outerIndex < currentNumberTasks; outerIndex++) {
 
+
+			//taskLevel corresponds to the calculated desired index for all elements
+			//as sorted by the above. 
+			//Since everything starts off at zero, taskLevel starts at zero.
+			taskLevel[outerIndex] = 0;
+			
 			//This assumes that all tasks have the same max service level
 			//Increase servie level to the maximum possible value. 
-			//We start at 1 because every task is already at zero. 			
+			//We start at 1 because every task is already at zero.
+			
 			for( innerIndex = 1; innerIndex <= max_level; innerIndex++) {
 				//The value the weight would be if we increased the weight of the task
 				calculationFactor = weightLevel[outerIndex] * tsk_rt(local_copy[outerIndex])->task_params.service_levels[innerIndex].relative_work;
@@ -571,12 +593,15 @@ static noinline void adjust_all_service_levels(int triggerNow){
 		}
 		
 		// Go through and actually change the weight of each task now that all the work is done.
-		acedf_total_QoS = 0;
+		adgsnedf_total_QoS = 0;
 		for(outerIndex=0; outerIndex < currentNumberTasks; outerIndex++) {
 			//tsk_rt(local_copy[outerIndex])->ctrl_page->service_level = taskLevel[outerIndex];
 			local_copy[outerIndex]->rt_param.task_params.target_service_level = taskLevel[outerIndex];
 
-			acedf_total_QoS += tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].quality_of_service;
+			adgsnedf_total_QoS += tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].quality_of_service;
+
+			//REMOVEME =  weightLevel[outerIndex]*10000;
+			//TRACE("minLevel %d, Service Level %d\n", REMOVEME, taskLevel[outerIndex]);
 		}  
 
 	}	
@@ -595,12 +620,29 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	const int bufferCPUs = NUMBER_OF_WITHELD_CPUS_ADGEDF; //Note: On my 12 core (24 virtual processors)
 	//If this is under 5, then the system crashes. (Thus, the system runs on 19 virtual cores)
 	double old_est_weight;
+	int i;
+	int j;
 	double difference_in_weight;
 	int triggerNow = 0;
 	double maxUtilization;
 	int largeWeight = 0;
 	int totalInInt = 0;
+	
 	unsigned int job_no;
+	int index_in_sorted = t->rt_param.task_params.sorted_list_index;
+	const int max_level = MAX_SERVICE_LEVEL_AGEDF;
+	const int lowest_level = 0;
+	
+	
+	
+	double new_ratio;
+	struct agedf_ratio_struct ratio_holder_a;
+	struct agedf_ratio_struct ratio_holder_b;
+	double QoSDifference;
+	double weight_range;
+	double current_min_weight;
+	double old_min_weight; 
+	int ratio_measurment; 
 
 	const double PERCENT_CHANGE_TRIGGER = 0.125; // If the task's weight changes by this percentage
 	// between job releases, then trigger an immediate reweighting
@@ -632,9 +674,84 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	 */
  
 	difference_in_weight = get_estimated_weight(t) - old_est_weight;
-
 	agsnedf_total_utilization += difference_in_weight;
 	
+	
+	////////////////////
+	
+	//establish the new Ratio 
+	QoSDifference = tsk_rt(t)->task_params.service_levels[max_level].quality_of_service - tsk_rt(t)->task_params.service_levels[lowest_level].quality_of_service;
+	old_min_weight = old_est_weight/tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].relative_work;
+	current_min_weight = get_estimated_weight(t)/tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].relative_work;
+	weight_range =  current_min_weight * (tsk_rt(t)->task_params.service_levels[max_level].relative_work - 1 );
+	new_ratio = QoSDifference/weight_range;
+
+	//Establish the old Ratio
+	if (index_in_sorted<0){
+		adgsnedf_total_min_weight += current_min_weight;
+		i=0;
+		while ( (i < currentNumberTasks)  && (adgsnedf_all_ratios[i].ratio >= new_ratio ) ) {
+			i++;
+		}
+		if (adgsnedf_all_ratios[i].ratio<0){
+			adgsnedf_all_ratios[i].ratio =  new_ratio;
+			adgsnedf_all_ratios[i].task = t;
+			t->rt_param.task_params.sorted_list_index = i;
+		} else {
+			j = i;
+			ratio_holder_a.ratio = new_ratio;
+			ratio_holder_a.task = t;
+			while ((j < currentNumberTasks) && (adgsnedf_all_ratios[j].ratio>=0)) {
+				ratio_holder_b = adgsnedf_all_ratios[j];
+				adgsnedf_all_ratios[j] = ratio_holder_a;
+				adgsnedf_all_ratios[j].task->rt_param.task_params.sorted_list_index = j;
+				ratio_holder_a = ratio_holder_b;
+				j++;
+			}
+			if ((j < currentNumberTasks) && (adgsnedf_all_ratios[j].ratio<0)) {
+				adgsnedf_all_ratios[j] = ratio_holder_a;
+				adgsnedf_all_ratios[j].task->rt_param.task_params.sorted_list_index = j;
+			}
+		}
+	} else {
+		j = index_in_sorted;
+		if(adgsnedf_all_ratios[index_in_sorted].ratio > new_ratio)  {		
+			while ( ((j+1) < currentNumberTasks) && (adgsnedf_all_ratios[j+1].ratio > new_ratio)) {
+				adgsnedf_all_ratios[j] = adgsnedf_all_ratios[j+1];
+				adgsnedf_all_ratios[j].task->rt_param.task_params.sorted_list_index = j;
+				j++;
+			}
+			if (j < currentNumberTasks) {
+				adgsnedf_all_ratios[j].ratio = new_ratio;
+				adgsnedf_all_ratios[j].task = t;
+				adgsnedf_all_ratios[j].task->rt_param.task_params.sorted_list_index = j;
+			} else {
+				TRACE("SOMETHING HAS GONE HORRIBLY WRONG, J can't be bigger than currentNumberTasks\n");
+			}
+		} else {
+			while ( ((j-1) >= 0) && (adgsnedf_all_ratios[j-1].ratio < new_ratio)) {
+				adgsnedf_all_ratios[j] = adgsnedf_all_ratios[j-1];
+				adgsnedf_all_ratios[j].task->rt_param.task_params.sorted_list_index = j;
+				j--;
+			}
+			if (j >=0 ) { 
+				adgsnedf_all_ratios[j].ratio = new_ratio;
+				adgsnedf_all_ratios[j].task = t;
+				adgsnedf_all_ratios[j].task->rt_param.task_params.sorted_list_index = j;
+			} else {
+				TRACE("SOMETHING HAS GONE HORRIBLY WRONG, J can't be smaller than 0\n");
+			}
+		}
+	}
+	
+	for (i =0;i< currentNumberTasks;i++){
+		ratio_measurment = adgsnedf_all_ratios[i].ratio*1000;
+		//TRACE("At index %d, the ratio is %d\n", i, ratio_measurment);
+	}
+	
+	
+	
+	////////
 	
 	totalInInt = 10000*agsnedf_total_utilization;
 	largeWeight = 10000*get_estimated_weight(t);
@@ -645,7 +762,7 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	largeWeight,
 	tsk_rt(t)->ctrl_page->service_level,
 	(int)(tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].quality_of_service*1000),
-	(int)(acedf_total_QoS*1000), 
+	(int)(adgsnedf_total_QoS*1000), 
 	job_no, totalInInt);
 	
 	//When the jobs are released, then start the initiali timers;	
@@ -875,7 +992,10 @@ static void adgsnedf_task_new(struct task_struct * t, int on_rq, int is_schedule
 
 	localNumber = currentNumberTasks; 
 	all_tasks[currentNumberTasks] = t;
+	adgsnedf_all_ratios[currentNumberTasks].ratio = -1;
+	adgsnedf_all_ratios[currentNumberTasks].task = 0;
 	currentNumberTasks++;
+	t->rt_param.task_params.sorted_list_index = -1;
 
 
 
@@ -910,7 +1030,7 @@ static void adgsnedf_task_new(struct task_struct * t, int on_rq, int is_schedule
 	if (is_running(t))
 		adgsnedf_job_arrival(t);
 		
-	acedf_total_QoS += tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].quality_of_service;
+	adgsnedf_total_QoS += tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].quality_of_service;
 	raw_spin_unlock_irqrestore(&adgsnedf_lock, flags);
 	
 }
@@ -1357,7 +1477,9 @@ static long adgsnedf_activate_plugin(void)
 	initialStartTime=0;
 	changeNow=0; 
 	currentNumberTasks = 0;
-	acedf_total_QoS = 0;
+	adgsnedf_total_QoS = 0;
+	
+	adgsnedf_total_min_weight = 0;
 
 
 	bheap_init(&adgsnedf_cpu_heap);
