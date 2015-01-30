@@ -841,25 +841,7 @@ static void remove_task_from_cluster(struct task_struct* t, int cluster_id){
 	all_ratios[cluster_id][currentNumberTasks_acedf[cluster_id]-1].ratio = -1;
 	all_ratios[cluster_id][currentNumberTasks_acedf[cluster_id]-1].task = 0;
 	t->rt_param.task_params.sorted_list_index =-1;
-// 
-// 	if (count >= 0) {
-// 		aconv= (int)(10000*all_ratios[cluster_id][count].ratio);
-// 		TRACE("REMOVING %d, Base count is %d, Max count is %d\n",aconv,count, currentNumberTasks_acedf[cluster_id]);
-// 		while (( (count+1) < currentNumberTasks_acedf[cluster_id]) && (all_ratios[cluster_id][count+1].ratio >=0) ){
-// 			//all_ratios[cluster_id][count] = all_ratios[cluster_id][count+1];
-// 			aconv= (int)(10000*all_ratios[cluster_id][count].ratio);
-// 			bconv= (int)(10000*all_ratios[cluster_id][count+1].ratio);
-// 			TRACE("For Count %d, Replace %d, with %d\n",count, aconv, bconv);
-// 			
-// 			count++;
-// 		}
-// 		aconv= (int)(10000*all_ratios[cluster_id][count].ratio);
-// 		TRACE("DONE Count %d, killing %d\n",count, aconv);
-// 		all_ratios[cluster_id][count].ratio = -1;
-// 		all_ratios[cluster_id][count].task = 0;
-// 	} else {
-// 		TRACE("Horrible why less than 0\n");
-// 	}
+
 
 	
 	currentNumberTasks_acedf[cluster_id]--;
@@ -1114,14 +1096,14 @@ static noinline int job_completion(struct task_struct *t, int forced)
 		triggerReweightNow = 1;
 		largeWeight = 10000*acedf_cluster_total_utilization[cluster_id];
 		//
-		TRACE(",,,,,time,%llu,REWEIGHTOVER10000,%d,\n",litmus_clock(), largeWeight);
+		//TRACE(",,,,,time,%llu,REWEIGHTOVER10000,%d,\n",litmus_clock(), largeWeight);
 		//
 	}
 	
 	//Mark Alpha
 	if (get_estimated_weight(t) > MAX_CPUS_UTIL) {
 		//
-		TRACE(",,,,,time,%llu,SINGLE_OVER,%d,\n",litmus_clock(), get_estimated_weight(t));
+		//TRACE(",,,,,time,%llu,SINGLE_OVER,%d,\n",litmus_clock(), get_estimated_weight(t));
 		//
 		triggerReweightNow = 1;
 	}
@@ -1132,7 +1114,7 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	{
 		triggerReweightNow = 1;
 		//
-		TRACE(",,,,,time,%llu,TRIGGER PER TASK\n",litmus_clock());
+		//TRACE(",,,,,time,%llu,TRIGGER PER TASK\n",litmus_clock());
 		//
 	}
 	
@@ -1141,7 +1123,7 @@ static noinline int job_completion(struct task_struct *t, int forced)
 		triggerReweightNow = 1;
 		lastReweightTime_acedf[task_cpu_cluster(t)->clusterID] = litmus_clock();
 		//
-		TRACE(",,,,,time,%llu,TRIGGER TIME\n",litmus_clock());
+		//TRACE(",,,,,time,%llu,TRIGGER TIME\n",litmus_clock());
 		//
 		
 	}
@@ -1536,7 +1518,25 @@ static void acedf_task_exit(struct task_struct * t)
 	/* unlink if necessary */
 	raw_spin_lock_irqsave(&cluster->cluster_lock, flags);
 	raw_spin_lock_irqsave(&cluster->secondary_lock, flags_secondary);
+	
+	
+	remove_task_from_cluster(t, cluster->clusterID);
+	numberTasks_acedf--;
 
+	
+	// Last one out, shut out the lights
+	if(numberTasks_acedf ==0){
+		changeNow_acedf=0; 
+		initialStartTime_acedf = 0;
+		lastRepartitionTime_acedf = 0;
+		TRACE("No more tasks\n");
+	}
+	if(currentNumberTasks_acedf[cluster->clusterID] == 0){
+		lastReweightTime_acedf[task_cpu_cluster(t)->clusterID] = 0;
+		acedf_cluster_total_utilization[cluster->clusterID] = 0;
+		acedf_cluster_total_QoS[cluster->clusterID] = 0;
+		TRACE("The Cluster %d is empty\n", cluster->clusterID);
+	}
 	
 	unlink(t);
 	if (tsk_rt(t)->scheduled_on != NO_CPU) {
@@ -1545,11 +1545,15 @@ static void acedf_task_exit(struct task_struct * t)
 		cpu->scheduled = NULL;
 		tsk_rt(t)->scheduled_on = NO_CPU;
 	}
+	
+	
+	
+	
 	raw_spin_unlock_irqrestore(&cluster->secondary_lock, flags_secondary);
 	raw_spin_unlock_irqrestore(&cluster->cluster_lock, flags);
 
 	BUG_ON(!is_realtime(t));
-        TRACE_TASK(t, "RIP\n");
+    TRACE_TASK(t, "RIP\n");
 }
 
 static long acedf_admit_task(struct task_struct* tsk)
@@ -1658,7 +1662,6 @@ static long acedf_activate_plugin(void)
 	numberTasks_acedf = 0;
 	
 	
-	//agsnedf_total_utilization_acedf = 0;
 	for(i =0; i< MAX_CLUSTERS; i++ ){
 		acedf_cluster_total_utilization[i]=0;
 		acedf_cluster_total_QoS[i] = 0;

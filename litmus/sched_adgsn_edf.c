@@ -958,6 +958,40 @@ static void adgsnedf_task_block(struct task_struct *t)
 	BUG_ON(!is_realtime(t));
 }
 
+static void remove_from_system(struct task_struct *t){
+	int count = t->rt_param.task_params.sorted_list_index;
+	int j;
+	
+	
+	j = count;
+	while (j < currentNumberTasks){
+		//aconv= (int)(10000*all_ratios[cluster_id][j].ratio);
+		if( (j+1) < currentNumberTasks){		
+			//bconv= (int)(10000*all_ratios[cluster_id][j+1].ratio);
+			//TRACE("For Count %d, Replace %d, with %d\n",count, aconv, bconv);			
+			adgsnedf_all_ratios[j] = adgsnedf_all_ratios[j+1];
+			if(adgsnedf_all_ratios[j].task != 0){
+				adgsnedf_all_ratios[j].task->rt_param.task_params.sorted_list_index = j;
+			}
+		}
+		j++;
+	}
+//	bconv= (int)(10000*all_ratios[cluster_id][currentNumberTasks_acedf[cluster_id]-1].ratio);
+//	TRACE("Killing ratio %d\n", bconv);
+	
+	adgsnedf_all_ratios[currentNumberTasks-1].ratio = -1;
+	adgsnedf_all_ratios[currentNumberTasks-1].task = 0;
+	t->rt_param.task_params.sorted_list_index =-1;
+
+
+	
+	currentNumberTasks--;
+	if (agsnedf_total_utilization<get_estimated_weight(t)){
+		agsnedf_total_utilization=0;
+	} else {
+		agsnedf_total_utilization-=get_estimated_weight(t);
+	}
+}
 
 static void adgsnedf_task_exit(struct task_struct * t)
 {
@@ -969,10 +1003,18 @@ static void adgsnedf_task_exit(struct task_struct * t)
 	/* When a task exits, we need to remove it's weight from the total utilization
 	 * There is a possibility that the estimated weight may drift from the total util
 	 * in this case, just set the total utilization to 0. */
-	if (agsnedf_total_utilization<get_estimated_weight(t)){
-		agsnedf_total_utilization=0;
-	} else {
-		agsnedf_total_utilization-=get_estimated_weight(t);
+
+	
+	remove_from_system(t);
+
+	
+	// Last one out, shut out the lights
+	if(currentNumberTasks ==0){
+		agsnedf_total_utilization = 0;
+		changeNow=0; 
+		initialStartTime = 0;
+		adgsnedf_total_QoS = 0;
+		TRACE("No more tasks\n");
 	}
 	
 	unlink(t);
