@@ -570,9 +570,9 @@ static noinline void repartition_tasks_acedf(int clusterID){
 		
 		//Find the cluster with the minimum amount of utilizliation
 		for(innerIndex = 0; innerIndex< num_clusters;innerIndex++){
-			aConvertValue = 10000*localTotalUtilization[minTotalUilIndex];
-			bConvertValue = 10000*localTotalUtilization[innerIndex];
-			TRACE("Old min10000,%d,testingNewMin,%d\n", aConvertValue, bConvertValue);
+// 			aConvertValue = 10000*localTotalUtilization[minTotalUilIndex];
+// 			bConvertValue = 10000*localTotalUtilization[innerIndex];
+// 			TRACE("Old min10000,%d,testingNewMin,%d\n", aConvertValue, bConvertValue);
 			if (localTotalUtilization[minTotalUilIndex] > localTotalUtilization[innerIndex]){
 				minTotalUilIndex = innerIndex;
 			}
@@ -634,8 +634,8 @@ static noinline void repartition_tasks_acedf(int clusterID){
 		for(outerIndex=0; outerIndex < number_of_all_tasks; outerIndex++) {
 			local_copy[outerIndex]->rt_param.task_params.target_cpu = taskCluster[outerIndex];
 			local_copy[outerIndex]->rt_param.task_params.target_service_level = taskLevel[outerIndex];
-			aConvertValue = (int)(10000*weightLevel[outerIndex]);
-			TRACE("REPART:Index,%d,MinWeight,%d,Cluster,%d,service_level,%d\n",outerIndex, aConvertValue,taskCluster[outerIndex], taskLevel[outerIndex]);
+			//aConvertValue = (int)(10000*weightLevel[outerIndex]);
+			//TRACE("REPART:Index,%d,MinWeight,%d,Cluster,%d,service_level,%d\n",outerIndex, aConvertValue,taskCluster[outerIndex], taskLevel[outerIndex]);
 	 	}
 	 	
 
@@ -823,10 +823,11 @@ static void remove_task_from_cluster(struct task_struct* t, int cluster_id){
 	
 	j = count;
 	while (j < currentNumberTasks_acedf[cluster_id]){
-		aconv= (int)(10000*all_ratios[cluster_id][j].ratio);
+		//aconv= (int)(10000*all_ratios[cluster_id][j].ratio);
 		if( (j+1) < currentNumberTasks_acedf[cluster_id]){		
-			bconv= (int)(10000*all_ratios[cluster_id][j+1].ratio);
-			TRACE("For Count %d, Replace %d, with %d\n",count, aconv, bconv);
+			//bconv= (int)(10000*all_ratios[cluster_id][j+1].ratio);
+			//TRACE("For Count %d, Replace %d, with %d\n",count, aconv, bconv);
+			
 			all_ratios[cluster_id][j] = all_ratios[cluster_id][j+1];
 			if(all_ratios[cluster_id][j].task != 0){
 				all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
@@ -834,8 +835,8 @@ static void remove_task_from_cluster(struct task_struct* t, int cluster_id){
 		}
 		j++;
 	}
-	bconv= (int)(10000*all_ratios[cluster_id][currentNumberTasks_acedf[cluster_id]-1].ratio);
-	TRACE("Killing ratio %d\n", bconv);
+//	bconv= (int)(10000*all_ratios[cluster_id][currentNumberTasks_acedf[cluster_id]-1].ratio);
+//	TRACE("Killing ratio %d\n", bconv);
 	
 	all_ratios[cluster_id][currentNumberTasks_acedf[cluster_id]-1].ratio = -1;
 	all_ratios[cluster_id][currentNumberTasks_acedf[cluster_id]-1].task = 0;
@@ -1026,36 +1027,43 @@ static noinline int job_completion(struct task_struct *t, int forced)
 			}
 		}
 	} else if (index_in_sorted< currentNumberTasks_acedf[cluster_id]){
-		j = index_in_sorted;
-		if(all_ratios[cluster_id][index_in_sorted].ratio > new_ratio)  {		
-			while ( ((j+1) < currentNumberTasks_acedf[cluster_id]) && (all_ratios[cluster_id][j+1].ratio > new_ratio)) {
-				all_ratios[cluster_id][j] = all_ratios[cluster_id][j+1];
-				all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
-				j++;
-			}
-			if (j < currentNumberTasks_acedf[cluster_id]) {
-				all_ratios[cluster_id][j].ratio = new_ratio;
-				all_ratios[cluster_id][j].task = t;
-				all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
+		if (all_ratios[cluster_id][index_in_sorted].task == 0){
+			TRACE("Something has gone wrong, Task %d has an index to a zero entry\n",t->pid );
+		} else if (all_ratios[cluster_id][index_in_sorted].task->pid != t->pid)  {
+		 	TRACE("Something has gone wrong, Task %d is pointing to %d but the entry thinks it should be, index is, %d\n",t->pid,all_ratios[cluster_id][index_in_sorted].task->pid,index_in_sorted);
+		}else {			
+			j = index_in_sorted;
+			if(all_ratios[cluster_id][index_in_sorted].ratio > new_ratio)  {		
+				while ( ((j+1) < currentNumberTasks_acedf[cluster_id]) && (all_ratios[cluster_id][j+1].ratio > new_ratio)) {
+					all_ratios[cluster_id][j] = all_ratios[cluster_id][j+1];
+					all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
+					j++;
+				}
+				if (j < currentNumberTasks_acedf[cluster_id]) {
+					all_ratios[cluster_id][j].ratio = new_ratio;
+					all_ratios[cluster_id][j].task = t;
+					all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
+				} else {
+					TRACE("SOMETHING HAS GONE HORRIBLY WRONG, J can't be bigger than currentNumberTasks_acedf[cluster_id]\n");
+				}
 			} else {
-				TRACE("SOMETHING HAS GONE HORRIBLY WRONG, J can't be bigger than currentNumberTasks_acedf[cluster_id]\n");
-			}
-		} else {
-			while ( ((j-1) >= 0) && (all_ratios[cluster_id][j-1].ratio < new_ratio)) {
-				all_ratios[cluster_id][j] = all_ratios[cluster_id][j-1];
-				all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
-				j--;
-			}
-			if (j >=0 ) { 
-				all_ratios[cluster_id][j].ratio = new_ratio;
-				all_ratios[cluster_id][j].task = t;
-				all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
-			} else {
-				TRACE("SOMETHING HAS GONE HORRIBLY WRONG, J can't be smaller than 0\n");
+				while ( ((j-1) >= 0) && (all_ratios[cluster_id][j-1].ratio < new_ratio)) {
+					all_ratios[cluster_id][j] = all_ratios[cluster_id][j-1];
+					all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
+					j--;
+				}
+				if (j >=0 ) { 
+					all_ratios[cluster_id][j].ratio = new_ratio;
+					all_ratios[cluster_id][j].task = t;
+					all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
+				} else {
+					TRACE("SOMETHING HAS GONE HORRIBLY WRONG, J can't be smaller than 0\n");
+				}
 			}
 		}
-	}
-	
+	} else {
+		TRACE("SOMETHING HAS GONE WRONG %d can't be larger than or equal to %d", index_in_sorted, currentNumberTasks_acedf[cluster_id]);
+	}	
 // 	for(j=0; j< currentNumberTasks_acedf[cluster_id];j++){
 // 		large_value_for_printing = (int)(10000*all_ratios[cluster_id][j].ratio);
 // 		TRACE("The cluster ID:%d, the value is %d\n", j, large_value_for_printing);
