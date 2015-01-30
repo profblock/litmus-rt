@@ -131,11 +131,6 @@ static struct bheap      adgsnedf_cpu_heap;
 #define MAX_SERVICE_LEVEL_AGEDF 3
 #define MAX_TASKS_AGEDF 100
 
-//TODO-AARON: The number here limits the number of real time threads. 
-//Need to make this more general or fix
-//Should make this linked list to be more general and flexible
-static struct task_struct* all_tasks[MAX_TASKS_AGEDF]; 
-
 
 //Mark Beta
 
@@ -146,7 +141,7 @@ struct agedf_ratio_struct {
 
 
 static struct agedf_ratio_struct adgsnedf_all_ratios[MAX_TASKS_AGEDF];
-static double adgsnedf_total_min_weight;
+//static double adgsnedf_total_min_weight;
 
 //TODO-AARON: This is part of the hacky fix above used to keep track of the number
 //of tasks in the system and add them to the task_struct. 
@@ -433,21 +428,12 @@ static noinline void adjust_all_service_levels(int triggerNow){
 	double weightLevel[currentNumberTasks];
 	int outerIndex;
 	int innerIndex;
-	int lowerIndex;
-	int upperIndex;
-	double valueDensityLowerIndex;
-	double valueDensityUpperIndex;
-	double estWeightDiffUpper;
-	double estWeightDiffLower;
 	
-	double QoSLowerIndex; 
-	double QoSUpperIndex; 
 	
 	double localTotalUtilization = 0;
 	double maxUtilization = num_online_cpus()-number_of_cpus_held_back;
 	//This is the max_level 
-	const int max_level = 3; //max level should be 3, but crashing. So let's try 2
-	const int lowest_level = 0; //lowest service level level should be 3, but crashing. So let's try 2
+	const int max_level = MAX_SERVICE_LEVEL_AGEDF; //max level should be 3, but crashing. So let's try 2
 	double calculationFactor;
 	
 	int REMOVEME;
@@ -458,71 +444,8 @@ static noinline void adjust_all_service_levels(int triggerNow){
 		for(count = 0;count < currentNumberTasks; count++) {
 			local_copy[count] = adgsnedf_all_ratios[count].task;
 			weightLevel[count] = get_estimated_weight(local_copy[count]) / tsk_rt(local_copy[count])->task_params.service_levels[tsk_rt(local_copy[count])->ctrl_page->service_level].relative_work;
+			localTotalUtilization+=weightLevel[count];
 		}
-	
-
-		//sort local_copy based on value density.. Assumes linear relationship
-		// The rather complicated formulas in here come from Aaron Block's dissertation
-		// specifically formula 6.11 on page 258
-		// you can get Aaron's dissertation here: http://cs.unc.edu/~block/aarondiss.pdf
-		
-// 		for(outerIndex = 1; outerIndex <= currentNumberTasks - 1 ; outerIndex++) {
-// 			innerIndex = outerIndex;
-// 		
-// 			upperIndex = innerIndex;
-// 			lowerIndex = upperIndex-1;
-// 			QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[upperIndex])->task_params.service_levels[lowest_level].quality_of_service;
-// 			QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
-// 
-// 			estWeightDiffUpper = (get_estimated_weight(local_copy[upperIndex])/tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].relative_work) * 
-// 			(tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].relative_work - 1 );
-// 			if (estWeightDiffUpper <= 0 ) {
-// 				valueDensityUpperIndex = DBL_MAX;
-// 			} else {
-// 				valueDensityUpperIndex =  QoSUpperIndex / estWeightDiffUpper;
-// 			}
-// 		
-// 			estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
-// 			(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
-// 			if (estWeightDiffLower <= 0 ) {
-// 				valueDensityLowerIndex = DBL_MAX;
-// 			} else {
-// 				valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
-// 			}
-// 
-// 
-// 			while (innerIndex > 0 && ( valueDensityUpperIndex > valueDensityLowerIndex)){
-// 
-// 				temp = local_copy[upperIndex];
-// 				local_copy[upperIndex] = local_copy[lowerIndex];
-// 				local_copy[lowerIndex] = temp;
-// 			
-// 				innerIndex--;
-// 				if (innerIndex > 0 ) {
-// 					upperIndex = innerIndex;
-// 					lowerIndex = upperIndex-1;
-// 			
-// 					QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[upperIndex])->task_params.service_levels[lowest_level].quality_of_service;
-// 					QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
-// 
-// 					estWeightDiffUpper = (get_estimated_weight(local_copy[upperIndex])/tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].relative_work) * 
-// 					(tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].relative_work - 1 );
-// 					if (estWeightDiffUpper <= 0 ) {
-// 						valueDensityUpperIndex = DBL_MAX;
-// 					} else {
-// 						valueDensityUpperIndex =  QoSUpperIndex / estWeightDiffUpper;
-// 					}
-// 		
-// 					estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
-// 					(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
-// 					if (estWeightDiffLower <= 0 ) {
-// 						valueDensityLowerIndex = DBL_MAX;
-// 					} else {
-// 						valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
-// 					}
-// 				}
-// 			}
-// 		}
 
 		//Local_copy is now sorted
 		
@@ -531,31 +454,11 @@ static noinline void adjust_all_service_levels(int triggerNow){
 		//Step 2 : Increase tasks from top to lowest_priorty_cpu()
 		//Step 3 : taskLevel
 
-		localTotalUtilization = adgsnedf_total_min_weight;
+		//localTotalUtilization = adgsnedf_total_min_weight;
 	
 		//Step 1: set all tasks to their base service level (level 0)
 		//This allows for us to get an assessment of how much "extra" capacity we have
-		
-// 		for(outerIndex=0; outerIndex < currentNumberTasks; outerIndex++) {
-// 
-// 			
-// 		
-// 			// If it is 0, then the estimated weight is the correct amount to to add to
-// 			// localTotalUtiization 
-// 			// FYI aConvertValue is a temp used for tracing
-// 			if (tsk_rt(local_copy[outerIndex])->ctrl_page->service_level==0) {
-// 				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]);
-// 								
-// 			} else {
-// 				//If a task has a service level that isn't currently zero, then
-// 				//we need to calculate it's weight if it were at service level zero. 
-// 				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]) / tsk_rt(local_copy[outerIndex])->task_params.service_levels[tsk_rt(local_copy[outerIndex])->ctrl_page->service_level].relative_work;
-// 			}
-// 			
-// 			//Calculate the total utilization. 
-// 			localTotalUtilization+=weightLevel[outerIndex];
-// 		}
-		
+	
 
 		//Step 2 : Increase tasks from top to lowest_priorty_cpu()
 		//Since all tasks are in sorted order at service level 0
@@ -595,13 +498,9 @@ static noinline void adjust_all_service_levels(int triggerNow){
 		// Go through and actually change the weight of each task now that all the work is done.
 		adgsnedf_total_QoS = 0;
 		for(outerIndex=0; outerIndex < currentNumberTasks; outerIndex++) {
-			//tsk_rt(local_copy[outerIndex])->ctrl_page->service_level = taskLevel[outerIndex];
 			local_copy[outerIndex]->rt_param.task_params.target_service_level = taskLevel[outerIndex];
-
 			adgsnedf_total_QoS += tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].quality_of_service;
 
-			//REMOVEME =  weightLevel[outerIndex]*10000;
-			//TRACE("minLevel %d, Service Level %d\n", REMOVEME, taskLevel[outerIndex]);
 		}  
 
 	}	
@@ -616,9 +515,7 @@ static noinline void adjust_all_service_levels(int triggerNow){
 /* caller holds adgsnedf_lock */
 static noinline void job_completion(struct task_struct *t, int forced)
 {
-	//TODO: Change this if I want to trigger a weight change when we have fewer than 2 CPUS left
-	const int bufferCPUs = NUMBER_OF_WITHELD_CPUS_ADGEDF; //Note: On my 12 core (24 virtual processors)
-	//If this is under 5, then the system crashes. (Thus, the system runs on 19 virtual cores)
+	const int bufferCPUs = NUMBER_OF_WITHELD_CPUS_ADGEDF; 
 	double old_est_weight;
 	int i;
 	int j;
@@ -688,7 +585,7 @@ static noinline void job_completion(struct task_struct *t, int forced)
 
 	//Establish the old Ratio
 	if (index_in_sorted<0){
-		adgsnedf_total_min_weight += current_min_weight;
+		//adgsnedf_total_min_weight += current_min_weight;
 		i=0;
 		while ( (i < currentNumberTasks)  && (adgsnedf_all_ratios[i].ratio >= new_ratio ) ) {
 			i++;
@@ -743,12 +640,7 @@ static noinline void job_completion(struct task_struct *t, int forced)
 			}
 		}
 	}
-	
-	for (i =0;i< currentNumberTasks;i++){
-		ratio_measurment = adgsnedf_all_ratios[i].ratio*1000;
-		//TRACE("At index %d, the ratio is %d\n", i, ratio_measurment);
-	}
-	
+
 	
 	
 	////////
@@ -991,7 +883,6 @@ static void adgsnedf_task_new(struct task_struct * t, int on_rq, int is_schedule
 	raw_spin_lock_irqsave(&adgsnedf_lock, flags);
 
 	localNumber = currentNumberTasks; 
-	all_tasks[currentNumberTasks] = t;
 	adgsnedf_all_ratios[currentNumberTasks].ratio = -1;
 	adgsnedf_all_ratios[currentNumberTasks].task = 0;
 	currentNumberTasks++;
@@ -1479,7 +1370,7 @@ static long adgsnedf_activate_plugin(void)
 	currentNumberTasks = 0;
 	adgsnedf_total_QoS = 0;
 	
-	adgsnedf_total_min_weight = 0;
+	//adgsnedf_total_min_weight = 0;
 
 
 	bheap_init(&adgsnedf_cpu_heap);

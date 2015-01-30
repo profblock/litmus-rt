@@ -132,24 +132,31 @@ acedf_domain_t *acedf;
 
 #define VERBOSE_INIT
 
-#define MAX_CLUSTERS 100
-#define MAX_TASKS 500
+#define MAX_CLUSTERS 4
+#define MAX_TASKS 100
 #define ACEDF_MAX_SERVICE_LEVEL 3
 
 //TODO-AARON: The number here limits the number of real time threads. 
 //Need to make this more general or fix
 //Should make this linked list to be more general and flexible
 static struct task_struct* all_tasks_acedf[MAX_TASKS]; 
-static int target_cluster_tasks[MAX_TASKS];
+//static int target_cluster_tasks[MAX_TASKS];
 
 
 //TODO-AARON: This is part of the hacky fix above used to keep track of the number
 //of tasks in the system and add them to the task_struct. 
-static int currentNumberTasks_acedf;
+static int currentNumberTasks_acedf[MAX_CLUSTERS];
+static int numberTasks_acedf;
 
 //Mark Beta
-static double all_ratios[MAX_TASKS];
-static double total_min_weight;
+
+struct acedf_ratio_struct {
+	double ratio;
+	struct task_struct* task; 
+};
+
+
+static struct acedf_ratio_struct all_ratios[MAX_CLUSTERS][MAX_TASKS];
 
 //TODO-AARON: This only works with 100 clusters. 
 static double acedf_cluster_total_utilization[MAX_CLUSTERS]; 
@@ -448,7 +455,7 @@ static void calculate_estimated_execution_cost_acedf(struct task_struct *t, doub
 	/* Update the difference between the estimated and actual execution time*/
 	t->rt_param.current_diff_est_actual_exec_cost = 
 		 get_exec_time(t) - get_estimated_exec_time(t);
- 	TRACE(",,,,time,%llu,task,%d,actualExecTime,%llu,estimated,%llu\n", litmus_clock(), t->pid,get_exec_time(t),get_estimated_exec_time(t));
+ 	//TRACE(",,,,time,%llu,task,%d,actualExecTime,%llu,estimated,%llu\n", litmus_clock(), t->pid,get_exec_time(t),get_estimated_exec_time(t));
  
 	t->rt_param.job_params.estimated_exec_time = 
 		(lt_t)	(p * t->rt_param.current_diff_est_actual_exec_cost + 
@@ -457,7 +464,7 @@ static void calculate_estimated_execution_cost_acedf(struct task_struct *t, doub
 }
 
 
-static void repartition_tasks_acedf(int clusterID){
+static noinline void repartition_tasks_acedf(int clusterID){
 	int count;
 	int i; 
 	struct task_struct *temp;
@@ -465,11 +472,11 @@ static void repartition_tasks_acedf(int clusterID){
 	// This is how tsk_rt(t)->ctrl_page->service_level;
 	const double number_of_cpus_held_back = NUMBER_OF_WITHELD_CPUS; //Note: On my 12 core (24 virtual processors)
 	//If this is under 5, then the system crashes. (Thus, the system runs on 19 virtual cores)
-	struct task_struct* local_copy[currentNumberTasks_acedf];
-	int local_cluster_copy[currentNumberTasks_acedf];
-	int taskLevel[currentNumberTasks_acedf];
-	int taskCluster[currentNumberTasks_acedf];
-	double weightLevel[currentNumberTasks_acedf];
+	struct task_struct** local_copy = all_tasks_acedf;
+
+	int taskLevel[numberTasks_acedf];
+	int taskCluster[numberTasks_acedf];
+	double weightLevel[numberTasks_acedf];
 	int outerIndex;
 	int innerIndex;
 	int lowerIndex;
@@ -480,9 +487,10 @@ static void repartition_tasks_acedf(int clusterID){
 	double estWeightDiffLower;
 	
 	double QoSLowerIndex; 
-	double QoSUpperIndex; 
+	double QoSUpperIndex;   
 	
 	int aConvertValue;
+	int bConvertValue;
 	//TOOD: Change to be an array... 
 	double localTotalUtilization[num_clusters];
 	double minTotalUtil;
@@ -496,135 +504,62 @@ static void repartition_tasks_acedf(int clusterID){
 	int number_of_tasks_on_cluster = 0;
 	double min_qos;
 	double max_qos;
-	
 	int fail_repartition = 0;
+	int number_of_all_tasks =0;
+	int min_cluster;
 	
 	
+	int lowestIndexEachCluster[num_clusters];
 	
-	//Improve the conditions here so it's time based not task release based. 
-	
-		//Copying array to local copy
-	for(count = 0;count < currentNumberTasks_acedf; count++) {
-		local_copy[count] = all_tasks_acedf[count];
-		number_of_tasks_on_cluster++;
+	for(count = 0; count < num_clusters; count++){
+		number_of_all_tasks+=currentNumberTasks_acedf[count];
+		localTotalUtilization[i] = 0;
+		lowestIndexEachCluster[count] = 0;
 	}
-
-
-	//sort local_copy based on value density.. Assumes linear relationship
-	// The rather complicated formulas in here come from Aaron Block's dissertation
-	// specifically formula 6.11 on page 258
-	// you can get Aaron's dissertation here: http://cs.unc.edu/~block/aarondiss.pdf
 	
-	for(outerIndex = 1; outerIndex <= (currentNumberTasks_acedf - 1) ; outerIndex++) {
-		innerIndex = outerIndex;
-	
-		upperIndex = innerIndex;
-		lowerIndex = upperIndex-1;
-		QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[upperIndex])->task_params.service_levels[lowest_level].quality_of_service;
-		QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
-
-		estWeightDiffUpper = (get_estimated_weight(local_copy[upperIndex])/tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].relative_work) * 
-		(tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].relative_work - 1 );
-		if (estWeightDiffUpper <= 0 ) {
-			valueDensityUpperIndex = DBL_MAX;
-		} else {
-			valueDensityUpperIndex =  QoSUpperIndex / estWeightDiffUpper;
-		}
-	
-		estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
-		(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
-		if (estWeightDiffLower <= 0 ) {
-			valueDensityLowerIndex = DBL_MAX;
-		} else {
-			valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
-		}
-
-
-		while (innerIndex > 0 && ( valueDensityUpperIndex > valueDensityLowerIndex)){
-
-			temp = local_copy[upperIndex];
-			local_copy[upperIndex] = local_copy[lowerIndex];
-			local_copy[lowerIndex] = temp;
-		
-			innerIndex--;
-			if (innerIndex > 0 ) {
-				upperIndex = innerIndex;
-				lowerIndex = upperIndex-1;
-		
-				QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[upperIndex])->task_params.service_levels[lowest_level].quality_of_service;
-				QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
-
-				estWeightDiffUpper = (get_estimated_weight(local_copy[upperIndex])/tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].relative_work) * 
-				(tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].relative_work - 1 );
-				if (estWeightDiffUpper <= 0 ) {
-					valueDensityUpperIndex = DBL_MAX;
-				} else {
-					valueDensityUpperIndex =  QoSUpperIndex / estWeightDiffUpper;
-				}
-	
-				estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
-				(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
-				if (estWeightDiffLower <= 0 ) {
-					valueDensityLowerIndex = DBL_MAX;
-				} else {
-					valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
-				}
+	//merges arrays into lowest 
+	for(count = 0; count < number_of_all_tasks; count++){
+		min_cluster = -1;
+		for( innerIndex = 0;innerIndex<num_clusters;innerIndex++){
+			if ((min_cluster < 0) && (lowestIndexEachCluster[innerIndex]<currentNumberTasks_acedf[innerIndex])){
+				min_cluster = innerIndex;
+			} else if ((min_cluster>=0) && all_ratios[innerIndex][lowestIndexEachCluster[innerIndex]].ratio > all_ratios[min_cluster][lowestIndexEachCluster[min_cluster]].ratio){
+				min_cluster = innerIndex;
 			}
 		}
+		local_copy[count] = all_ratios[min_cluster][lowestIndexEachCluster[min_cluster]].task;
+		
+// 		aConvertValue = (int)(10000*all_ratios[min_cluster][lowestIndexEachCluster[min_cluster]].ratio);
+// 		TRACE("For Count %d, choose index %d, and ratio %d\n", count, min_cluster, aConvertValue);
+		
+		lowestIndexEachCluster[min_cluster]++;
+		
+		
+
 	}
-	//Let's validate sorted. 
-	//TODO: Remove this. 
-// 	for(lowerIndex =0; lowerIndex< currentNumberTasks_acedf;lowerIndex++){
-// 		QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
-// 		estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
-// 				(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
-// 		if (estWeightDiffLower <= 0 ) {
-// 			valueDensityLowerIndex = DBL_MAX;
-// 		} else {
-// 			valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
-// 		}
-// 
-// 		//TRACE("REPARTITION: Task %i, value Density %d, QoS Diff %d, weightDiff %d, valu\n", lowerIndex,(int)(valueDensityLowerIndex*1000), (int)(QoSLowerIndex*1000), (int)(estWeightDiffLower*1000));
-// 		
-// 				
-// 	}
-	//Local_copy is now sorted
+	
 	
 	//Now need to maximize
 	//Step 1 : Set all tasks to base level (level 0)
 	//Step 2 : Increase tasks from top to lowest_priorty_cpu()
 	//Step 3 : taskLevel
 
-	for (i = 0; i < num_clusters; i++ ){
-		localTotalUtilization[i] = 0;
-	}
 
 	//Step 1: set all tasks to their base service level (level 0) and assign to processor 
 	// most remaining capacity with 
 	//This allows for us to get an assessment of how much "extra" capacity we have
 
-	
-	
-	for(outerIndex=0; outerIndex < currentNumberTasks_acedf; outerIndex++) {
+	for(outerIndex=0; outerIndex < number_of_all_tasks; outerIndex++) {
 		//taskLevel corresponds to the calculated desired index for all elements
 		//as sorted by the above. 
 		//Since everything starts off at zero, taskLevel starts at zero.
-		taskLevel[outerIndex] = 0;
+
 		
 	
 		// If it is 0, then the estimated weight is the correct amount to to add to
 		// localTotalUtiization 
 		// FYI aConvertValue is a temp used for tracing
-		if (tsk_rt(local_copy[outerIndex])->ctrl_page->service_level==0) {
-			weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]);
-			
-			
-		} else {
-			//If a task has a service level that isn't currently zero, then
-			//we need to calculate it's weight if it were at service level zero. 
-			weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]) / tsk_rt(local_copy[outerIndex])->task_params.service_levels[tsk_rt(local_copy[outerIndex])->ctrl_page->service_level].relative_work;
-			
-		}		
+		weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]) / tsk_rt(local_copy[outerIndex])->task_params.service_levels[tsk_rt(local_copy[outerIndex])->ctrl_page->service_level].relative_work;	
 		
 		//Calculate the total utilization. 
 		//localTotalUtilization+=weightLevel[outerIndex];
@@ -633,13 +568,18 @@ static void repartition_tasks_acedf(int clusterID){
 		minTotalUtil = localTotalUtilization[0];
 		minTotalUilIndex = 0;
 		
-		//Find the minimal task  in the cluster
+		//Find the cluster with the minimum amount of utilizliation
 		for(innerIndex = 0; innerIndex< num_clusters;innerIndex++){
-			if (minTotalUtil> localTotalUtilization[innerIndex]){
+			aConvertValue = 10000*localTotalUtilization[minTotalUilIndex];
+			bConvertValue = 10000*localTotalUtilization[innerIndex];
+			TRACE("Old min10000,%d,testingNewMin,%d\n", aConvertValue, bConvertValue);
+			if (localTotalUtilization[minTotalUilIndex] > localTotalUtilization[innerIndex]){
 				minTotalUilIndex = innerIndex;
-				minTotalUtil = localTotalUtilization[innerIndex];
 			}
+
 		}
+		
+		//Assign this task to that cluster
 		localTotalUtilization[minTotalUilIndex] += weightLevel[outerIndex];
 		taskCluster[outerIndex] = minTotalUilIndex;
 		//TRACE("Assigning %d to cluster %d\n", outerIndex, minTotalUilIndex);
@@ -652,21 +592,23 @@ static void repartition_tasks_acedf(int clusterID){
 			fail_repartition = 1;
 		}
 	}
-	
-	
-	//Step 2 : Increase tasks from top to lowest_priorty_cpu()
-	//Since all tasks are in sorted order at service level 0
-	//we start from the first task and attempt to increase its service level 
-	//to the maximum value without overloading the system. 
-	//Even if we overload on one task, we still keep on increasing other tasks
-	//because we might be able to increase their levels slightly 
+
+// 	
+// 	
+// 	//Step 2 : Increase tasks from top to lowest_priorty_cpu()
+// 	//Since all tasks are in sorted order at service level 0
+// 	//we start from the first task and attempt to increase its service level 
+// 	//to the maximum value without overloading the system. 
+// 	//Even if we overload on one task, we still keep on increasing other tasks
+// 	//because we might be able to increase their levels slightly 
 	if(fail_repartition==0){
 		TRACE(",,,,,time,%llu,REPARTITIONING\n", litmus_clock());
-		for(outerIndex=0; outerIndex < currentNumberTasks_acedf; outerIndex++) {
+		for(outerIndex=0; outerIndex < number_of_all_tasks; outerIndex++) {
 
 			//This assumes that all tasks have the same max service level
 			//Increase servie level to the maximum possible value. 
-			//We start at 1 because every task is already at zero. 			
+			//We start at 1 because every task is already at zero. 	
+			taskLevel[outerIndex] = 0;		
 			for( innerIndex = 1; innerIndex <= max_level; innerIndex++) {
 				//The value the weight would be if we increased the weight of the task
 				calculationFactor = weightLevel[outerIndex] * tsk_rt(local_copy[outerIndex])->task_params.service_levels[innerIndex].relative_work;			
@@ -682,28 +624,25 @@ static void repartition_tasks_acedf(int clusterID){
 			//Change the total utilization by subtracting the old weight and adding the new weight
 			//We don't actually change the weight here though
 			localTotalUtilization[taskCluster[outerIndex]] = localTotalUtilization[taskCluster[outerIndex]]-weightLevel[outerIndex] + weightLevel[outerIndex]* tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].relative_work;	
-// 			aConvertValue = 10000*localTotalUtilization[taskCluster[outerIndex]];
-// 			TRACE("Task %d, the total Utilization %d\n", outerIndex, aConvertValue);
 		}
 	
 	// ***********************************************************************************
 	// ***********************************************************************************
-	// TOOD: FOR RETURNING
-	// Change the target_cpu and the target_service level for each task in the for loop here
-	// DO NOT change the service level or the CPU. 
-	// 
-	// In addition you need to change the "job completition method" so that if there is a
-	// target service level, then we'll change it there and we WON'T trigger a reweighting event. 
+
 	
-		// Go through and actually change the weight of each task now that all the work is done.
-		for(outerIndex=0; outerIndex < currentNumberTasks_acedf; outerIndex++) {
+		//Go through and actually change the weight of each task now that all the work is done.
+		for(outerIndex=0; outerIndex < number_of_all_tasks; outerIndex++) {
 			local_copy[outerIndex]->rt_param.task_params.target_cpu = taskCluster[outerIndex];
 			local_copy[outerIndex]->rt_param.task_params.target_service_level = taskLevel[outerIndex];
+			aConvertValue = (int)(10000*weightLevel[outerIndex]);
+			TRACE("REPART:Index,%d,MinWeight,%d,Cluster,%d,service_level,%d\n",outerIndex, aConvertValue,taskCluster[outerIndex], taskLevel[outerIndex]);
 	 	}
 	 	
+
+
 	 	// Change the repartitioning time to now for all clusters. 
 	 	for(outerIndex = 0; outerIndex < num_clusters; outerIndex++){
-		 	lastReweightTime_acedf[outerIndex] = litmus_clock();
+		 	lastReweightTime_acedf[outerIndex] = litmus_clock();			 	 
 		 }
 	}
 
@@ -725,13 +664,10 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 	int count;
 	int i; 
 	struct task_struct *temp;
-
-	const double number_of_cpus_held_back = NUMBER_OF_WITHELD_CPUS; //Note: On my 12 core (24 virtual processors)
-	//If this is under 5, then the system crashes. (Thus, the system runs on 19 virtual cores)
-	struct task_struct* local_copy[currentNumberTasks_acedf];
-	int local_cluster_copy[currentNumberTasks_acedf];
-	int taskLevel[currentNumberTasks_acedf];
-	double weightLevel[currentNumberTasks_acedf];
+	const double number_of_cpus_held_back = NUMBER_OF_WITHELD_CPUS; 
+	
+	int taskLevel[numberTasks_acedf];
+	double weightLevel[numberTasks_acedf];
 	int outerIndex;
 	int innerIndex;
 	int lowerIndex;
@@ -745,12 +681,12 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 	double QoSUpperIndex; 
 	
 	int aConvertValue;
-	int bConvertValue;
 	double localTotalUtilization = 0;
 	double maxUtilization = cluster_size-number_of_cpus_held_back;
 	//This is the max_level 
 	//If repartition_trigger is at most 1.0, then it will never have any impact. 
-	const double repartition_trigger = 1.25; // TODO: Change this to a real value
+	//const double repartition_trigger = 1.25; // TODO: Change this to a real value
+	const double repartition_trigger = 0.90; // TODO: Change this to a real value
 	const int max_level = ACEDF_MAX_SERVICE_LEVEL; //max level should be 3, but crashing. So let's try 2
 	const int lowest_level = 0; //lowest service level level should be 3, but crashing. So let's try 2
 	double calculationFactor;
@@ -765,77 +701,21 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 	//changeNow_acedf=1;
 	if( triggerReweightNow!=0 ) { 
 		
-		//Copying array to local copy
-		for(count = 0;count < currentNumberTasks_acedf; count++) {
-			if ( all_tasks_acedf[count]->rt_param.task_params.cpu == representative_CPU) {
-				local_copy[number_of_tasks_on_cluster] = all_tasks_acedf[count];
-				number_of_tasks_on_cluster++;
-			}
+
+		//Step 1: set all tasks to their base service level (level 0)
+		//This allows for us to get an assessment of how much "extra" capacity we have
+
+		for(count = 0;count < currentNumberTasks_acedf[clusterID]; count++) {
+
+			weightLevel[count] = get_estimated_weight(all_ratios[clusterID][count].task) / tsk_rt(all_ratios[clusterID][count].task)->task_params.service_levels[tsk_rt(all_ratios[clusterID][count].task)->ctrl_page->service_level].relative_work;
+			localTotalUtilization+=weightLevel[count];
 		}
-	
+		
 
 		//sort local_copy based on value density.. Assumes linear relationship
 		// The rather complicated formulas in here come from Aaron Block's dissertation
 		// specifically formula 6.11 on page 258
 		// you can get Aaron's dissertation here: http://cs.unc.edu/~block/aarondiss.pdf
-		
-		for(outerIndex = 1; outerIndex <= (number_of_tasks_on_cluster - 1) ; outerIndex++) {
-			innerIndex = outerIndex;
-		
-			upperIndex = innerIndex;
-			lowerIndex = upperIndex-1;
-			QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[upperIndex])->task_params.service_levels[lowest_level].quality_of_service;
-			QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
-
-			estWeightDiffUpper = (get_estimated_weight(local_copy[upperIndex])/tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].relative_work) * 
-			(tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].relative_work - 1 );
-			if (estWeightDiffUpper <= 0 ) {
-				valueDensityUpperIndex = DBL_MAX;
-			} else {
-				valueDensityUpperIndex =  QoSUpperIndex / estWeightDiffUpper;
-			}
-		
-			estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
-			(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
-			if (estWeightDiffLower <= 0 ) {
-				valueDensityLowerIndex = DBL_MAX;
-			} else {
-				valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
-			}
-
-
-			while (innerIndex > 0 && ( valueDensityUpperIndex > valueDensityLowerIndex)){
-
-				temp = local_copy[upperIndex];
-				local_copy[upperIndex] = local_copy[lowerIndex];
-				local_copy[lowerIndex] = temp;
-			
-				innerIndex--;
-				if (innerIndex > 0 ) {
-					upperIndex = innerIndex;
-					lowerIndex = upperIndex-1;
-			
-					QoSUpperIndex = tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[upperIndex])->task_params.service_levels[lowest_level].quality_of_service;
-					QoSLowerIndex = tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].quality_of_service - tsk_rt(local_copy[lowerIndex])->task_params.service_levels[lowest_level].quality_of_service;
-
-					estWeightDiffUpper = (get_estimated_weight(local_copy[upperIndex])/tsk_rt(local_copy[upperIndex])->task_params.service_levels[tsk_rt(local_copy[upperIndex])->ctrl_page->service_level].relative_work) * 
-					(tsk_rt(local_copy[upperIndex])->task_params.service_levels[max_level].relative_work - 1 );
-					if (estWeightDiffUpper <= 0 ) {
-						valueDensityUpperIndex = DBL_MAX;
-					} else {
-						valueDensityUpperIndex =  QoSUpperIndex / estWeightDiffUpper;
-					}
-		
-					estWeightDiffLower = (get_estimated_weight(local_copy[lowerIndex])/tsk_rt(local_copy[lowerIndex])->task_params.service_levels[tsk_rt(local_copy[lowerIndex])->ctrl_page->service_level].relative_work) * 
-					(tsk_rt(local_copy[lowerIndex])->task_params.service_levels[max_level].relative_work - 1 );
-					if (estWeightDiffLower <= 0 ) {
-						valueDensityLowerIndex = DBL_MAX;
-					} else {
-						valueDensityLowerIndex =  QoSLowerIndex / estWeightDiffLower;
-					}
-				}
-			}
-		}
 
 		//Local_copy is now sorted
 		
@@ -843,36 +723,6 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 		//Step 1 : Set all tasks to base level (level 0)
 		//Step 2 : Increase tasks from top to lowest_priorty_cpu()
 		//Step 3 : taskLevel
-
-		localTotalUtilization = 0;
-	
-		//Step 1: set all tasks to their base service level (level 0)
-		//This allows for us to get an assessment of how much "extra" capacity we have
-		
-		for(outerIndex=0; outerIndex < number_of_tasks_on_cluster; outerIndex++) {
-			//taskLevel corresponds to the calculated desired index for all elements
-			//as sorted by the above. 
-			//Since everything starts off at zero, taskLevel starts at zero.
-			taskLevel[outerIndex] = 0;
-			
-		
-			// If it is 0, then the estimated weight is the correct amount to to add to
-			// localTotalUtiization 
-			if (tsk_rt(local_copy[outerIndex])->ctrl_page->service_level==0) {
-				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]);
-				
-				
-			} else {
-				//If a task has a service level that isn't currently zero, then
-				//we need to calculate it's weight if it were at service level zero. 
-				weightLevel[outerIndex] = get_estimated_weight(local_copy[outerIndex]) / tsk_rt(local_copy[outerIndex])->task_params.service_levels[tsk_rt(local_copy[outerIndex])->ctrl_page->service_level].relative_work;				
-			}
-
-
-			//Calculate the total utilization. 
-			localTotalUtilization+=weightLevel[outerIndex];			
-		}
-		
 		
 		//Step 2 : Increase tasks from top to lowest_priorty_cpu()
 		//Since all tasks are in sorted order at service level 0
@@ -881,19 +731,16 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 		//Even if we overload on one task, we still keep on increasing other tasks
 		//because we might be able to increase their levels slightly 
 		
-		for(outerIndex=0; outerIndex < number_of_tasks_on_cluster; outerIndex++) {
+		for(outerIndex=0; outerIndex < currentNumberTasks_acedf[clusterID]; outerIndex++) {
 
 			//This assumes that all tasks have the same max service level
 			//Increase servie level to the maximum possible value. 
-			//We start at 1 because every task is already at zero. 			
+			//We start at 1 because every task is already at zero. 		
+			taskLevel[outerIndex] = 0;	
 			for( innerIndex = 1; innerIndex <= max_level; innerIndex++) {
 				//The value the weight would be if we increased the weight of the task
-				calculationFactor = weightLevel[outerIndex] * tsk_rt(local_copy[outerIndex])->task_params.service_levels[innerIndex].relative_work;
-				
-
-				
-				//If we increased it, would the system be over utilized?
-				// MARK ALPHA 
+				calculationFactor = weightLevel[outerIndex] * tsk_rt(all_ratios[clusterID][outerIndex].task)->task_params.service_levels[innerIndex].relative_work;
+			
 				if( (calculationFactor<MAX_CPUS_UTIL) && ((localTotalUtilization-weightLevel[outerIndex]+calculationFactor) < maxUtilization)) {
 					//Increasing the weight of the task
 					taskLevel[outerIndex] = innerIndex;
@@ -902,9 +749,7 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 			
 			//Change the total utilization by subtracting the old weight and adding the new weight
 			//We don't actually change the weight here though
-			localTotalUtilization = localTotalUtilization-weightLevel[outerIndex] + weightLevel[outerIndex]* tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].relative_work;
-
-		
+			localTotalUtilization = localTotalUtilization-weightLevel[outerIndex] + weightLevel[outerIndex]* tsk_rt(all_ratios[clusterID][outerIndex].task)->task_params.service_levels[taskLevel[outerIndex]].relative_work;
 		}
 
 		
@@ -912,17 +757,15 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 		acedf_cluster_total_QoS[clusterID] = 0.0;
 
 
-		for(outerIndex=0; outerIndex < number_of_tasks_on_cluster; outerIndex++) {
-
+		for(outerIndex=0; outerIndex < currentNumberTasks_acedf[clusterID]; outerIndex++) {
 			//Change the service level to be the target_service_level
-			local_copy[outerIndex]->rt_param.task_params.target_service_level = taskLevel[outerIndex];
-			acedf_cluster_total_QoS[clusterID] += tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].quality_of_service;
-
+			all_ratios[clusterID][outerIndex].task->rt_param.task_params.target_service_level = taskLevel[outerIndex];
+			acedf_cluster_total_QoS[clusterID] += tsk_rt(all_ratios[clusterID][outerIndex].task)->task_params.service_levels[taskLevel[outerIndex]].quality_of_service;
 		}
 		
-		
-		//////////////////////////////////////////
-		//Now, determine if we need to repartition. 
+// 		
+// 		//////////////////////////////////////////
+// 		//Now, determine if we need to repartition. 
 		min_qos = acedf_cluster_total_QoS[clusterID];
 		max_qos = acedf_cluster_total_QoS[clusterID];
 		
@@ -937,7 +780,7 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 		} 
 		
 
-		if ((min_qos > 0) && (max_qos > 0)  && ((max_qos/min_qos) > repartition_trigger)  && ( (lastRepartitionTime_acedf + nanosecondsBetweenRepartitions_acedf) < litmus_clock())) {
+		if ( /*(min_qos > 0) && (max_qos > 0)  && ((max_qos/min_qos) > repartition_trigger)  && */( (lastRepartitionTime_acedf + nanosecondsBetweenRepartitions_acedf) < litmus_clock())) {
 			
 	
 			//We check this value twice to make sure that we aren't trying to repartition twice back to back
@@ -967,11 +810,111 @@ static noinline void adjust_all_service_levels_acedf(int triggerReweightNow, int
 				}
 			}
 		}	
+
 	}	
 }
 
+static void remove_task_from_cluster(struct task_struct* t, int cluster_id){
+	int count = t->rt_param.task_params.sorted_list_index;
+	int aconv;
+	int bconv;
+	int j;
+	
+	
+	j = count;
+	while (j < currentNumberTasks_acedf[cluster_id]){
+		aconv= (int)(10000*all_ratios[cluster_id][j].ratio);
+		if( (j+1) < currentNumberTasks_acedf[cluster_id]){		
+			bconv= (int)(10000*all_ratios[cluster_id][j+1].ratio);
+			TRACE("For Count %d, Replace %d, with %d\n",count, aconv, bconv);
+			all_ratios[cluster_id][j] = all_ratios[cluster_id][j+1];
+			if(all_ratios[cluster_id][j].task != 0){
+				all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
+			}
+		}
+		j++;
+	}
+	bconv= (int)(10000*all_ratios[cluster_id][currentNumberTasks_acedf[cluster_id]-1].ratio);
+	TRACE("Killing ratio %d\n", bconv);
+	
+	all_ratios[cluster_id][currentNumberTasks_acedf[cluster_id]-1].ratio = -1;
+	all_ratios[cluster_id][currentNumberTasks_acedf[cluster_id]-1].task = 0;
+	t->rt_param.task_params.sorted_list_index =-1;
+// 
+// 	if (count >= 0) {
+// 		aconv= (int)(10000*all_ratios[cluster_id][count].ratio);
+// 		TRACE("REMOVING %d, Base count is %d, Max count is %d\n",aconv,count, currentNumberTasks_acedf[cluster_id]);
+// 		while (( (count+1) < currentNumberTasks_acedf[cluster_id]) && (all_ratios[cluster_id][count+1].ratio >=0) ){
+// 			//all_ratios[cluster_id][count] = all_ratios[cluster_id][count+1];
+// 			aconv= (int)(10000*all_ratios[cluster_id][count].ratio);
+// 			bconv= (int)(10000*all_ratios[cluster_id][count+1].ratio);
+// 			TRACE("For Count %d, Replace %d, with %d\n",count, aconv, bconv);
+// 			
+// 			count++;
+// 		}
+// 		aconv= (int)(10000*all_ratios[cluster_id][count].ratio);
+// 		TRACE("DONE Count %d, killing %d\n",count, aconv);
+// 		all_ratios[cluster_id][count].ratio = -1;
+// 		all_ratios[cluster_id][count].task = 0;
+// 	} else {
+// 		TRACE("Horrible why less than 0\n");
+// 	}
 
+	
+	currentNumberTasks_acedf[cluster_id]--;
+	acedf_cluster_total_utilization[cluster_id] -= get_estimated_weight(t);
+}
 
+static void add_task_to_cluster(struct task_struct* t, int cluster_id){
+	int i = 0;
+	const int max_level = ACEDF_MAX_SERVICE_LEVEL;
+	const int lowest_level = 0; 
+	int j;
+	double QoSDifference;
+	double weight_range;
+	double current_min_weight;
+	double ratio; 
+	struct acedf_ratio_struct ratio_holder_a;
+	struct acedf_ratio_struct ratio_holder_b;
+	
+	
+	
+	
+	currentNumberTasks_acedf[cluster_id]++;
+	acedf_cluster_total_utilization[cluster_id] += get_estimated_weight(t);
+	
+	
+	QoSDifference = tsk_rt(t)->task_params.service_levels[max_level].quality_of_service - tsk_rt(t)->task_params.service_levels[lowest_level].quality_of_service;
+	current_min_weight = get_estimated_weight(t)/tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].relative_work;
+	weight_range =  current_min_weight * (tsk_rt(t)->task_params.service_levels[max_level].relative_work - 1 );
+	ratio = QoSDifference/weight_range;
+	
+	i=0;
+	while ( (i < currentNumberTasks_acedf[cluster_id])  && (all_ratios[cluster_id][i].ratio >= ratio ) ) {
+		i++;
+	}
+	if (all_ratios[cluster_id][i].ratio<0){
+		all_ratios[cluster_id][i].ratio =  ratio;
+		all_ratios[cluster_id][i].task = t;
+		t->rt_param.task_params.sorted_list_index = i;
+	} else {
+		j = i;
+		ratio_holder_a.ratio = ratio;
+		ratio_holder_a.task = t;
+		while ((j < currentNumberTasks_acedf[cluster_id]) && (all_ratios[cluster_id][j].ratio>=0)) {
+			ratio_holder_b = all_ratios[cluster_id][j];
+			all_ratios[cluster_id][j] = ratio_holder_a;
+			all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
+			ratio_holder_a = ratio_holder_b;
+			j++;
+		}
+		if ((j < currentNumberTasks_acedf[cluster_id]) && (all_ratios[cluster_id][j].ratio<0)) {
+			all_ratios[cluster_id][j] = ratio_holder_a;
+			all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
+		}
+	}
+
+}
 
 static void acedf_migrate_to(struct task_struct* task_to_migrate, int target_cluster_id)
 {
@@ -980,19 +923,20 @@ static void acedf_migrate_to(struct task_struct* task_to_migrate, int target_clu
 	unsigned long flags;
 	acedf_domain_t *oldcluster = task_cpu_cluster(task_to_migrate);
 	int oldClusterID  = oldcluster-> clusterID;
-
-	task_to_migrate->rt_param.task_params.cpu = acedf[target_cluster_id].representative_CPU;
 	
-	acedf_cluster_total_utilization[target_cluster_id] += get_estimated_weight(task_to_migrate);
-	acedf_cluster_total_utilization[oldClusterID] -= get_estimated_weight(task_to_migrate);
-
+	remove_task_from_cluster(task_to_migrate, oldClusterID);
+	
+	//task_to_migrate->rt_param.task_params.cpu = acedf[target_cluster_id].representative_CPU; 
+	
+	//add_task_to_cluster(task_to_migrate, target_cluster_id);
+	add_task_to_cluster(task_to_migrate, oldClusterID);
 }
 
 
 static noinline int job_completion(struct task_struct *t, int forced)
 {
 
-	int i;
+	int i,j;
 	int cluster_id;
 
 	acedf_domain_t *oldcluster;
@@ -1008,9 +952,21 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	int totalUtil = 0;
 	double maxUtilization;
 	unsigned int job_no;
+	const int max_level = ACEDF_MAX_SERVICE_LEVEL;
+	const int lowest_level = 0; 
 	const double PERCENT_CHANGE_TRIGGER = 0.125; // If the task's weight changes by this percentage
 	// between job releases, then trigger an immediate reweighting
 
+	int index_in_sorted = t->rt_param.task_params.sorted_list_index;
+	double new_ratio;
+	struct acedf_ratio_struct ratio_holder_a;
+	struct acedf_ratio_struct ratio_holder_b;
+	double QoSDifference;
+	double weight_range;
+	double current_min_weight;
+	double old_min_weight; 
+	int ratio_measurment;
+	int large_value_for_printing;
 
 	BUG_ON(!t);
 
@@ -1029,10 +985,83 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	 * Aaron Block's dissertation referenced on pages 293 (the experimental values for
 	 * a and c) and the relationship of a,b,c is given on page 253 just below (6.2)
 	 */
-	calculate_estimated_execution_cost_acedf(t,0.102,0.30345);
+	calculate_estimated_execution_cost_acedf(t,0.102,0.30345); 
 	
 	t->rt_param.job_params.estimated_weight = 
 		((double) get_estimated_exec_time(t))/get_rt_relative_deadline(t);
+	
+	/* Update the sorted tasks */
+		/* establish the new Ratio  */
+	old_min_weight = old_est_weight/tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].relative_work;
+	
+	QoSDifference = tsk_rt(t)->task_params.service_levels[max_level].quality_of_service - tsk_rt(t)->task_params.service_levels[lowest_level].quality_of_service;
+	current_min_weight = get_estimated_weight(t)/tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].relative_work;
+	weight_range =  current_min_weight * (tsk_rt(t)->task_params.service_levels[max_level].relative_work - 1 );
+	new_ratio = QoSDifference/weight_range;
+
+	/* Put into the sorted list array */ 
+	if (index_in_sorted<0){
+		i=0;
+		while ( (i < currentNumberTasks_acedf[cluster_id])  && (all_ratios[cluster_id][i].ratio >= new_ratio ) ) {
+			i++;
+		}
+		if (all_ratios[cluster_id][i].ratio<0){
+			all_ratios[cluster_id][i].ratio =  new_ratio;
+			all_ratios[cluster_id][i].task = t;
+			t->rt_param.task_params.sorted_list_index = i;
+		} else {
+			j = i;
+			ratio_holder_a.ratio = new_ratio;
+			ratio_holder_a.task = t;
+			while ((j < currentNumberTasks_acedf[cluster_id]) && (all_ratios[cluster_id][j].ratio>=0)) {
+				ratio_holder_b = all_ratios[cluster_id][j];
+				all_ratios[cluster_id][j] = ratio_holder_a;
+				all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
+				ratio_holder_a = ratio_holder_b;
+				j++;
+			}
+			if ((j < currentNumberTasks_acedf[cluster_id]) && (all_ratios[cluster_id][j].ratio<0)) {
+				all_ratios[cluster_id][j] = ratio_holder_a;
+				all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
+			}
+		}
+	} else if (index_in_sorted< currentNumberTasks_acedf[cluster_id]){
+		j = index_in_sorted;
+		if(all_ratios[cluster_id][index_in_sorted].ratio > new_ratio)  {		
+			while ( ((j+1) < currentNumberTasks_acedf[cluster_id]) && (all_ratios[cluster_id][j+1].ratio > new_ratio)) {
+				all_ratios[cluster_id][j] = all_ratios[cluster_id][j+1];
+				all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
+				j++;
+			}
+			if (j < currentNumberTasks_acedf[cluster_id]) {
+				all_ratios[cluster_id][j].ratio = new_ratio;
+				all_ratios[cluster_id][j].task = t;
+				all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
+			} else {
+				TRACE("SOMETHING HAS GONE HORRIBLY WRONG, J can't be bigger than currentNumberTasks_acedf[cluster_id]\n");
+			}
+		} else {
+			while ( ((j-1) >= 0) && (all_ratios[cluster_id][j-1].ratio < new_ratio)) {
+				all_ratios[cluster_id][j] = all_ratios[cluster_id][j-1];
+				all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
+				j--;
+			}
+			if (j >=0 ) { 
+				all_ratios[cluster_id][j].ratio = new_ratio;
+				all_ratios[cluster_id][j].task = t;
+				all_ratios[cluster_id][j].task->rt_param.task_params.sorted_list_index = j;
+			} else {
+				TRACE("SOMETHING HAS GONE HORRIBLY WRONG, J can't be smaller than 0\n");
+			}
+		}
+	}
+	
+// 	for(j=0; j< currentNumberTasks_acedf[cluster_id];j++){
+// 		large_value_for_printing = (int)(10000*all_ratios[cluster_id][j].ratio);
+// 		TRACE("The cluster ID:%d, the value is %d\n", j, large_value_for_printing);
+// 	}
+
+	
 	
 	
 	/* The change in the estimated_weight of this job must be added to the total 
@@ -1147,7 +1176,7 @@ static noinline int job_completion(struct task_struct *t, int forced)
 
 			
 			acedf_migrate_to(t, newcluster->clusterID);
-			
+			 
 			//release all the locks
 			for(i =0; i< acedf_number_of_clusters; i++ ){
 				if (i !=oldcluster->clusterID && i !=newcluster->clusterID){
@@ -1372,22 +1401,27 @@ static void acedf_task_new(struct task_struct * t, int on_rq, int is_scheduled)
 	unsigned long 		flags_secondary;
 	cpu_entry_t* 		entry;
 	acedf_domain_t*		cluster;
-	int localNumber; 
+	int 				cluster_id;
+
 
 	TRACE("acedf edf: task new %d\n", t->pid);
 
 	/* the cluster doesn't change even if t is scheduled */
 	cluster = task_cpu_cluster(t);
+	cluster_id  = cluster->clusterID;
 	
 	TRACE("ACEDF: Task , %d, is initially assigned to %d\n", t->pid, cluster->clusterID);
 
 	raw_spin_lock_irqsave(&cluster->cluster_lock, flags);
 	raw_spin_lock_irqsave(&cluster->secondary_lock, flags_secondary);
 	
-
-	localNumber = currentNumberTasks_acedf; 
-	all_tasks_acedf[currentNumberTasks_acedf] = t;
-	currentNumberTasks_acedf++;
+	
+	all_tasks_acedf[currentNumberTasks_acedf[cluster_id]] = t;
+	all_ratios[cluster_id][currentNumberTasks_acedf[cluster_id]].ratio = -1;
+	all_ratios[cluster_id][currentNumberTasks_acedf[cluster_id]].task = 0;
+	currentNumberTasks_acedf[cluster_id]++;
+	numberTasks_acedf++;
+	t->rt_param.task_params.sorted_list_index = -1;
 	
 	/* TODO: allow for better setting of estimated execution
 	 * time.
@@ -1613,7 +1647,8 @@ static long acedf_activate_plugin(void)
 	lastRepartitionTime_acedf = 0;
 	initialStartTime_acedf=0;
 	changeNow_acedf=0; 
-	currentNumberTasks_acedf = 0;
+	numberTasks_acedf = 0;
+	
 	
 	//agsnedf_total_utilization_acedf = 0;
 	for(i =0; i< MAX_CLUSTERS; i++ ){
@@ -1693,7 +1728,8 @@ static long acedf_activate_plugin(void)
 
 	/* cycle through cluster and add cpus to them */
 	for (i = 0; i < num_clusters; i++) {
-
+		currentNumberTasks_acedf[i] = 0;
+		
 		for_each_online_cpu(cpu) {
 			/* check if the cpu is already in a cluster */
 			for (j = 0; j < num_clusters; j++)
