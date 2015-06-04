@@ -602,7 +602,7 @@ static noinline void repartition_tasks_acedf(int clusterID){
 // 	//Even if we overload on one task, we still keep on increasing other tasks
 // 	//because we might be able to increase their levels slightly 
 	if(fail_repartition==0){
-		TRACE(",,,,,time,%llu,REPARTITIONING\n", litmus_clock());
+		//TRACE(",,,,,time,%llu,REPARTITIONING\n", litmus_clock());
 		for(outerIndex=0; outerIndex < number_of_all_tasks; outerIndex++) {
 
 			//This assumes that all tasks have the same max service level
@@ -1063,7 +1063,7 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	largeWeight = 10000*get_estimated_weight(t);
 	totalUtil = 10000*acedf_cluster_total_utilization[cluster_id];
 	job_no =  t->rt_param.job_params.job_no;
-	TRACE(",,,,,time,%llu,taskID,%d,cluster,%d,estWtTimes10000,%d,serviceLevel,%u,taskQoSTimes1000,%d,TOTALQoSTimes1000,%d,jobNumber,%u,totalUtil10000,%d\n", 
+	/*TRACE(",,,,,time,%llu,taskID,%d,cluster,%d,estWtTimes10000,%d,serviceLevel,%u,taskQoSTimes1000,%d,TOTALQoSTimes1000,%d,jobNumber,%u,totalUtil10000,%d\n", 
 	litmus_clock(), 
 	t->pid,
 	task_cpu_cluster(t)->clusterID,
@@ -1072,7 +1072,7 @@ static noinline int job_completion(struct task_struct *t, int forced)
 	(int)(tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].quality_of_service*1000),
 	(int)(acedf_cluster_total_QoS[task_cpu_cluster(t)->clusterID]*1000), 
 	job_no,
-	totalUtil );
+	totalUtil );*/
 
 
 		
@@ -1133,6 +1133,7 @@ static noinline int job_completion(struct task_struct *t, int forced)
 		triggerReweightNow = 0;
 	}
 	
+	//ADD THIS BACK IN
 	adjust_all_service_levels_acedf(triggerReweightNow,cluster_id);
 	
 	if (tsk_rt(t)->ctrl_page->service_level != t->rt_param.task_params.target_service_level) {
