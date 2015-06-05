@@ -345,7 +345,7 @@ void __add_release_on(rt_domain_t* rt, struct task_struct *task,
  */
 void __add_release(rt_domain_t* rt, struct task_struct *task)
 {
-	//TRACE_TASK(task, "add_release(), rel=%llu\n", get_release(task));
+	TRACE_TASK(task, "add_release(), rel=%llu\n", get_release(task));
 	list_add(&tsk_rt(task)->list, &rt->tobe_released);
 	task->rt_param.domain = rt;
 

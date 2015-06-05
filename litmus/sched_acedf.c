@@ -1253,7 +1253,7 @@ static struct task_struct* acedf_schedule(struct task_struct * prev)
 
 #ifdef WANT_ALL_SCHED_EVENTS
 	TRACE_TASK(prev, "invoked acedf_schedule.\n");
-
+#endif
 	if (exists){
 		TRACE_TASK(prev,
 			   "blocks:%d out_of_time:%d np:%d sleep:%d preempt:%d "
@@ -1265,7 +1265,7 @@ static struct task_struct* acedf_schedule(struct task_struct * prev)
 		TRACE_TASK(prev, "will be preempted by %s/%d\n",
 			   entry->linked->comm, entry->linked->pid);
 	}
-#endif
+
 
 	/* If a task blocks we have no choice but to reschedule.
 	 */
