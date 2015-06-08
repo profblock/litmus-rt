@@ -20,10 +20,7 @@ static inline void setup_release(struct task_struct *t, lt_t release)
 		serviceLevel = tsk_rt(t)->ctrl_page->service_level;
 		struct rt_service_level current_service_level = 
 			get_service_levels(t)[serviceLevel];
-		//tsk_rt(t)->job_params.current_service_level
-		//tsk_rt(t)->ctrl_page->service_level
 		lt_t relative_deadline = current_service_level.service_level_period;
-		//TODO: Remove printing
 
 		t->rt_param.task_params.relative_deadline = relative_deadline;
 		t->rt_param.task_params.period = relative_deadline;
@@ -34,10 +31,6 @@ static inline void setup_release(struct task_struct *t, lt_t release)
 		 * the next job should be released at. We update the control_page one here
 		 */
 	
-		//TODO: see if this two pronged service level is working
-		//If it is't cut it
-		//tsk_rt(t)->ctrl_page->service_level = get_current_survice_level(t);
-		//TRACE("Setup_release 3 : %d\n", tsk_rt(t)->ctrl_page->service_level);
 	} else {
 		TRACE("No service levels defined\n");
 	}
