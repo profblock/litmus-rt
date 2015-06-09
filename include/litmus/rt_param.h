@@ -114,6 +114,7 @@ struct rt_task {
 	/* The service level that the task will change to next time */
 	unsigned int	target_service_level;	
 	
+	/* If maintaining a sorted list of tasks, this is the index in that list */ 
 	int sorted_list_index;
 };
 
