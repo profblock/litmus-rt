@@ -132,7 +132,6 @@ static struct bheap      adgsnedf_cpu_heap;
 #define MAX_TASKS_AGEDF 100
 
 
-//Mark Beta
 
 struct agedf_ratio_struct {
 	double ratio;
@@ -141,20 +140,27 @@ struct agedf_ratio_struct {
 
 
 static struct agedf_ratio_struct adgsnedf_all_ratios[MAX_TASKS_AGEDF];
-//static double adgsnedf_total_min_weight;
-
-//TODO-AARON: This is part of the hacky fix above used to keep track of the number
-//of tasks in the system and add them to the task_struct. 
 static int currentNumberTasks;
 
 static double agsnedf_total_utilization;
 static double adgsnedf_total_QoS;
 
-static const lt_t nanosecondsBetweenReweights = 1000000000/4; //Number of times per second that the system is weighted at a minimum;
-static lt_t lastReweightTime; //time used to keep track of the last time the task was reweighted
-static lt_t initialStartTime;//Time the first task starts
-static lt_t initialStableWindowTime=((lt_t)10)*((lt_t)1000000000); //For the first 10 seconds, nothing happens. 
-static int changeNow; //if 1, under utilized. if 0, nothing. -1 if over utilized
+/* Number of times per second that the system is weighted at a minimum;*/
+static const lt_t nanosecondsBetweenReweights = 1000000000/4; 
+
+/* time used to keep track of the last time the task was reweighted*/
+static lt_t lastReweightTime; 
+
+/*Time the first task starts*/
+static lt_t initialStartTime; 
+
+/* For the first 10 seconds, nothing happens. */
+static lt_t initialStableWindowTime=((lt_t)10)*((lt_t)1000000000); 
+
+/* if 1, under utilized. if 0, nothing. -1 if over utilized*/
+static int changeNow; 
+
+static const double PERCENT_CHANGE_TRIGGER = 0.125;
 
 
 static rt_domain_t adgsnedf;
@@ -416,86 +422,84 @@ static void calculate_estimated_execution_cost(struct task_struct *t, double p, 
 }
  
   
-//Should only be called by job_completion. Thus, caller holds adgnedf_lock
+/* Should only be called by job_completion. Thus, caller holds adgnedf_lock */
 static noinline void adjust_all_service_levels(int triggerNow){
 	int count;
-	struct task_struct *temp;
 
-	const int number_of_cpus_held_back = NUMBER_OF_WITHELD_CPUS_ADGEDF; //Note: On my 12 core (24 virtual processors)
-	//If this is under 5, then the system crashes. (Thus, the system runs on 19 virtual cores)
+	const int number_of_cpus_held_back = NUMBER_OF_WITHELD_CPUS_ADGEDF;
 	struct task_struct* local_copy[currentNumberTasks];
 	int taskLevel[currentNumberTasks];
 	double weightLevel[currentNumberTasks];
 	int outerIndex;
 	int innerIndex;
 	
-	
 	double localTotalUtilization = 0;
 	double maxUtilization = num_online_cpus()-number_of_cpus_held_back;
-	//This is the max_level 
-	const int max_level = MAX_SERVICE_LEVEL_AGEDF; //max level should be 3, but crashing. So let's try 2
+	const int max_level = MAX_SERVICE_LEVEL_AGEDF; 
 	double calculationFactor;
-	
-	int REMOVEME;
-	
-	//Improve the conditions here so it's time based not task release based. 
+
 	if( triggerNow!=0 ) { 
-		//Copying array to local copy
+		/* Copying array to local copy*/
 		for(count = 0;count < currentNumberTasks; count++) {
 			local_copy[count] = adgsnedf_all_ratios[count].task;
 			weightLevel[count] = get_estimated_weight(local_copy[count]) / tsk_rt(local_copy[count])->task_params.service_levels[tsk_rt(local_copy[count])->ctrl_page->service_level].relative_work;
 			localTotalUtilization+=weightLevel[count];
 		}
-
-		//Local_copy is now sorted
+		/*
+		Local_copy is now sorted
 		
-		//Now need to maximize
-		//Step 1 : Set all tasks to base level (level 0)
-		//Step 2 : Increase tasks from top to lowest_priorty_cpu()
-		//Step 3 : taskLevel
+		Now need to maximize
+		Step 1 : Set all tasks to base level (level 0)
+		Step 2 : Increase tasks from top to lowest_priorty_cpu()
+		Step 3 : taskLevel
 
-		//localTotalUtilization = adgsnedf_total_min_weight;
+		localTotalUtilization = adgsnedf_total_min_weight;
 	
-		//Step 1: set all tasks to their base service level (level 0)
-		//This allows for us to get an assessment of how much "extra" capacity we have
+		Step 1: set all tasks to their base service level (level 0)
+		This allows for us to get an assessment of how much "extra" capacity we have
 	
 
-		//Step 2 : Increase tasks from top to lowest_priorty_cpu()
-		//Since all tasks are in sorted order at service level 0
-		//we start from the first task and attempt to increase its service level 
-		//to the maximum value without overloading the system. 
-		//Even if we overload on one task, we still keep on increasing other tasks
-		//because we might be able to increase their levels slightly 
-		
+		Step 2 : Increase tasks from top to lowest_priorty_cpu()
+		Since all tasks are in sorted order at service level 0
+		we start from the first task and attempt to increase its service level 
+		to the maximum value without overloading the system. 
+		Even if we overload on one task, we still keep on increasing other tasks
+		because we might be able to increase their levels slightly 
+		*/		
 		for(outerIndex=0; outerIndex < currentNumberTasks; outerIndex++) {
 
-
-			//taskLevel corresponds to the calculated desired index for all elements
-			//as sorted by the above. 
-			//Since everything starts off at zero, taskLevel starts at zero.
+			/*
+			taskLevel corresponds to the calculated desired index for all elements
+			as sorted by the above. 
+			Since everything starts off at zero, taskLevel starts at zero.
+			*/
 			taskLevel[outerIndex] = 0;
-			
-			//This assumes that all tasks have the same max service level
-			//Increase servie level to the maximum possible value. 
-			//We start at 1 because every task is already at zero.
+
+			/*			
+			This assumes that all tasks have the same max service level
+			Increase servie level to the maximum possible value. 
+			We start at 1 because every task is already at zero.
+			*/
 			
 			for( innerIndex = 1; innerIndex <= max_level; innerIndex++) {
-				//The value the weight would be if we increased the weight of the task
+				/* The value the weight would be if we increased the weight of the task*/
 				calculationFactor = weightLevel[outerIndex] * tsk_rt(local_copy[outerIndex])->task_params.service_levels[innerIndex].relative_work;
 								
-				//If we increased it, would the system be over utilized?
+				/* If we increased it, would the system be over utilized?*/
 				if( (calculationFactor<MAX_CPUS_UTIL_ADGEDF) && ((localTotalUtilization-weightLevel[outerIndex]+calculationFactor) < maxUtilization)) {
 					//Increasing the weight of the task
 					taskLevel[outerIndex] = innerIndex;
 				}
 			}
 			
-			//Change the total utilization by subtracting the old weight and adding the new weight
-			//We don't actually change the weight here though
+			/*
+			Change the total utilization by subtracting the old weight and adding the new weight
+			We don't actually change the weight here though
+			*/
 			localTotalUtilization = localTotalUtilization-weightLevel[outerIndex] + weightLevel[outerIndex]* tsk_rt(local_copy[outerIndex])->task_params.service_levels[taskLevel[outerIndex]].relative_work;		
 		}
 		
-		// Go through and actually change the weight of each task now that all the work is done.
+		/* Go through and actually change the weight of each task now that all the work is done. */
 		adgsnedf_total_QoS = 0;
 		for(outerIndex=0; outerIndex < currentNumberTasks; outerIndex++) {
 			local_copy[outerIndex]->rt_param.task_params.target_service_level = taskLevel[outerIndex];
@@ -522,13 +526,13 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	double difference_in_weight;
 	int triggerNow = 0;
 	double maxUtilization;
-	int largeWeight = 0;
-	int totalInInt = 0;
 	
-	unsigned int job_no;
 	int index_in_sorted = t->rt_param.task_params.sorted_list_index;
 	const int max_level = MAX_SERVICE_LEVEL_AGEDF;
 	const int lowest_level = 0;
+	
+	const double alpha = 0.102;
+	const double beta = 0.30345;
 	
 	
 	
@@ -539,9 +543,8 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	double weight_range;
 	double current_min_weight;
 	double old_min_weight; 
-	int ratio_measurment; 
 
-	const double PERCENT_CHANGE_TRIGGER = 0.125; // If the task's weight changes by this percentage
+	const double percentChangeTigger = PERCENT_CHANGE_TRIGGER; // If the task's weight changes by this percentage
 	// between job releases, then trigger an immediate reweighting
 	BUG_ON(!t);
 
@@ -553,18 +556,17 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	
 	old_est_weight = get_estimated_weight(t);
  
-	//TODO: replace the (0.10206228,1) in next line with user-set p and i values
+
 	/* The values 0.102 and 0.30345 are the a and b values that are calculated from
 	 * Aaron Block's dissertation referenced on pages 293 (the experimental values for
 	 * a and c) and the relationship of a,b,c is given on page 253 just below (6.2)
 	 */
-	calculate_estimated_execution_cost(t,0.102,0.30345);
+	calculate_estimated_execution_cost(t,alpha,beta);
 	
 	t->rt_param.job_params.estimated_weight = 
 		((double) get_estimated_exec_time(t))/get_rt_relative_deadline(t);
 	
-	//TODO: Make a flag for the scheduler base on whether service levels are adjusted
-	//based on time or trigger level. 
+
 	
 	/* The change in the estimated_weight of this job must be added to the total 
 	 * utilization
@@ -574,18 +576,17 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	agsnedf_total_utilization += difference_in_weight;
 	
 	
-	////////////////////
 	
-	//establish the new Ratio 
+	/* establish the new Ratio */
 	QoSDifference = tsk_rt(t)->task_params.service_levels[max_level].quality_of_service - tsk_rt(t)->task_params.service_levels[lowest_level].quality_of_service;
 	old_min_weight = old_est_weight/tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].relative_work;
 	current_min_weight = get_estimated_weight(t)/tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].relative_work;
 	weight_range =  current_min_weight * (tsk_rt(t)->task_params.service_levels[max_level].relative_work - 1 );
 	new_ratio = QoSDifference/weight_range;
 
-	//Establish the old Ratio
+	/* Establish the old Ratio*/
 	if (index_in_sorted<0){
-		//adgsnedf_total_min_weight += current_min_weight;
+
 		i=0;
 		while ( (i < currentNumberTasks)  && (adgsnedf_all_ratios[i].ratio >= new_ratio ) ) {
 			i++;
@@ -640,25 +641,9 @@ static noinline void job_completion(struct task_struct *t, int forced)
 			}
 		}
 	}
-
 	
-	
-	////////
-	
-	totalInInt = 10000*agsnedf_total_utilization;
-	largeWeight = 10000*get_estimated_weight(t);
-	job_no =  t->rt_param.job_params.job_no;
-	TRACE(",,,,,time,%llu,taskID,%d,estWtTimes10000,%d,serviceLevel,%u,taskQoSTimes1000,%d,totalQoS1000,%d,jobNumber,%u,totoalUtil10000,%d\n", 
-	litmus_clock(), 
-	t->pid,
-	largeWeight,
-	tsk_rt(t)->ctrl_page->service_level,
-	(int)(tsk_rt(t)->task_params.service_levels[tsk_rt(t)->ctrl_page->service_level].quality_of_service*1000),
-	(int)(adgsnedf_total_QoS*1000), 
-	job_no, totalInInt);
-	
-	//When the jobs are released, then start the initiali timers;	
-	if(initialStartTime ==0){
+	/* When the jobs are released, then start the initiali timers;	*/
+	if(initialStartTime == 0){
 		initialStartTime = litmus_clock();
 	}
 	if(lastReweightTime == 0){
@@ -670,19 +655,19 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	
 	
 	maxUtilization = num_online_cpus()-bufferCPUs;
-	//Trigger because the system is too utilized
+	/* Trigger because the system is too utilized */
 	if( agsnedf_total_utilization > maxUtilization) {
 		triggerNow = 1;
 	}
 	
-	//trigger because a task changed its weight by too much
-	if( (get_estimated_weight(t) > old_est_weight*(1+PERCENT_CHANGE_TRIGGER)) ||
-		(get_estimated_weight(t) < old_est_weight*(1-PERCENT_CHANGE_TRIGGER)))
+	/* trigger because a task changed its weight by too much*/
+	if( (get_estimated_weight(t) > old_est_weight*(1+percentChangeTigger)) ||
+		(get_estimated_weight(t) < old_est_weight*(1-percentChangeTigger)))
 	{
 		triggerNow = 1;
 	}
 	
-	//trigger because enough time has passed
+	/* trigger because enough time has passed */
 	if ( (lastReweightTime + nanosecondsBetweenReweights) < litmus_clock()){
 		triggerNow = 1;
 		lastReweightTime = litmus_clock();
@@ -692,7 +677,7 @@ static noinline void job_completion(struct task_struct *t, int forced)
 		triggerNow = 1;
 	}
 	
-	// if we aren't past the initial window, then don't reweight
+	/* if we aren't past the initial window, then don't reweight */
 	if((initialStartTime+initialStableWindowTime) > litmus_clock()){
 		triggerNow = 0;
 	}
@@ -702,9 +687,6 @@ static noinline void job_completion(struct task_struct *t, int forced)
 	if (tsk_rt(t)->ctrl_page->service_level != t->rt_param.task_params.target_service_level) {
 		tsk_rt(t)->ctrl_page->service_level = t->rt_param.task_params.target_service_level;
 	}
-	
-	//This line is also incorect. No idea why it would let me use it
-	//t->rt_param.job_params.current_service_level+=30;
 	
 	/* prepare for next period */
 	prepare_for_next_period(t);
@@ -965,10 +947,7 @@ static void remove_from_system(struct task_struct *t){
 	
 	j = count;
 	while (j < currentNumberTasks){
-		//aconv= (int)(10000*all_ratios[cluster_id][j].ratio);
 		if( (j+1) < currentNumberTasks){		
-			//bconv= (int)(10000*all_ratios[cluster_id][j+1].ratio);
-			//TRACE("For Count %d, Replace %d, with %d\n",count, aconv, bconv);			
 			adgsnedf_all_ratios[j] = adgsnedf_all_ratios[j+1];
 			if(adgsnedf_all_ratios[j].task != 0){
 				adgsnedf_all_ratios[j].task->rt_param.task_params.sorted_list_index = j;
@@ -976,8 +955,6 @@ static void remove_from_system(struct task_struct *t){
 		}
 		j++;
 	}
-//	bconv= (int)(10000*all_ratios[cluster_id][currentNumberTasks_acedf[cluster_id]-1].ratio);
-//	TRACE("Killing ratio %d\n", bconv);
 	
 	adgsnedf_all_ratios[currentNumberTasks-1].ratio = -1;
 	adgsnedf_all_ratios[currentNumberTasks-1].task = 0;
@@ -1008,7 +985,7 @@ static void adgsnedf_task_exit(struct task_struct * t)
 	remove_from_system(t);
 
 	
-	// Last one out, shut out the lights
+	/* Last one out, shut out the lights */
 	if(currentNumberTasks ==0){
 		agsnedf_total_utilization = 0;
 		changeNow=0; 
